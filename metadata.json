@@ -1,0 +1,6 @@
+{
+  "name": "ChatMesh",
+  "description": "WhatsApp-style offline native mesh chat powered by WiFi Direct and WiFi Aware without Internet",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
