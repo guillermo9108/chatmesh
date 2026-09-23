@@ -22,10 +22,15 @@ import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.PersonAdd
+import androidx.compose.material.icons.filled.Phone
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -41,6 +46,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -57,6 +63,8 @@ fun ContactsTab(
     onInviteClick: (ContactEntity) -> Unit,
     onAudioCallClick: (ContactEntity) -> Unit,
     onVideoCallClick: (ContactEntity) -> Unit,
+    onAddContactClick: () -> Unit,
+    onRefreshContacts: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val filteredContacts = if (searchQuery.isBlank()) {
@@ -68,194 +76,247 @@ fun ContactsTab(
         }
     }
 
-    Column(
+    Box(
         modifier = modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
     ) {
-        // Quick Search Bar
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 8.dp)
-        ) {
-            OutlinedTextField(
-                value = searchQuery,
-                onValueChange = onSearchQueryChange,
-                placeholder = { Text("Buscar nombre o número móvil...", fontSize = 14.sp) },
-                leadingIcon = {
-                    Icon(
-                        imageVector = Icons.Default.Search,
-                        contentDescription = "Buscar",
-                        tint = WhatsAppTeal
-                    )
-                },
-                trailingIcon = {
-                    if (searchQuery.isNotEmpty()) {
-                        IconButton(onClick = { onSearchQueryChange("") }) {
-                            Icon(imageVector = Icons.Default.Clear, contentDescription = "Borrar búsqueda")
-                        }
-                    }
-                },
-                singleLine = true,
-                shape = RoundedCornerShape(24.dp),
-                colors = TextFieldDefaults.colors(
-                    focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
-                    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
-                    focusedIndicatorColor = WhatsAppTeal,
-                    unfocusedIndicatorColor = Color.Transparent
-                ),
+        Column(modifier = Modifier.fillMaxSize()) {
+            // Quick Search Bar
+            Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .testTag("contacts_search_input")
-            )
-        }
-
-        // Header summary
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = "Contactos en tu dispositivo (${filteredContacts.size})",
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Bold,
-                color = Color.Gray
-            )
-        }
-
-        LazyColumn(modifier = Modifier.fillMaxSize()) {
-            items(filteredContacts, key = { it.phoneNumber }) { contact ->
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable {
-                            if (contact.isRegisteredInMesh) {
-                                onChatClick(contact)
+                    .padding(horizontal = 16.dp, vertical = 8.dp)
+            ) {
+                OutlinedTextField(
+                    value = searchQuery,
+                    onValueChange = onSearchQueryChange,
+                    placeholder = { Text("Buscar nombre o número móvil...", fontSize = 14.sp) },
+                    leadingIcon = {
+                        Icon(
+                            imageVector = Icons.Default.Search,
+                            contentDescription = "Buscar",
+                            tint = WhatsAppTeal
+                        )
+                    },
+                    trailingIcon = {
+                        if (searchQuery.isNotEmpty()) {
+                            IconButton(onClick = { onSearchQueryChange("") }) {
+                                Icon(imageVector = Icons.Default.Clear, contentDescription = "Borrar búsqueda")
                             }
                         }
-                        .padding(horizontal = 16.dp, vertical = 10.dp)
-                        .testTag("contact_item_${contact.phoneNumber}"),
-                    verticalAlignment = Alignment.CenterVertically
+                    },
+                    singleLine = true,
+                    shape = RoundedCornerShape(24.dp),
+                    colors = TextFieldDefaults.colors(
+                        focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                        unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                        focusedIndicatorColor = WhatsAppTeal,
+                        unfocusedIndicatorColor = Color.Transparent
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("contacts_search_input")
+                )
+            }
+
+            // Header summary with action buttons
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    text = "Contactos (${filteredContacts.size})",
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.Gray
+                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onClick = onRefreshContacts, modifier = Modifier.size(32.dp)) {
+                        Icon(
+                            imageVector = Icons.Default.Refresh,
+                            contentDescription = "Sincronizar contactos",
+                            tint = WhatsAppTeal,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    OutlinedButton(
+                        onClick = onAddContactClick,
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.height(32.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.PersonAdd,
+                            contentDescription = null,
+                            tint = WhatsAppTeal,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Nuevo", fontSize = 12.sp, color = WhatsAppTeal)
+                    }
+                }
+            }
+
+            if (filteredContacts.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(24.dp),
+                    contentAlignment = Alignment.Center
                 ) {
-                    // Contact Avatar
-                    Box {
-                        Box(
+                    Card(
+                        shape = RoundedCornerShape(16.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
                             modifier = Modifier
-                                .size(48.dp)
-                                .clip(CircleShape)
-                                .background(
-                                    if (contact.isRegisteredInMesh) WhatsAppTeal.copy(alpha = 0.15f)
-                                    else Color.LightGray.copy(alpha = 0.4f)
-                                ),
-                            contentAlignment = Alignment.Center
+                                .fillMaxWidth()
+                                .padding(24.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
                         ) {
-                            Text(
-                                text = contact.displayName.take(1).uppercase(),
-                                fontSize = 18.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = if (contact.isRegisteredInMesh) WhatsAppTeal else Color.DarkGray
-                            )
-                        }
-                        if (contact.isConnected) {
                             Box(
                                 modifier = Modifier
-                                    .size(12.dp)
+                                    .size(60.dp)
                                     .clip(CircleShape)
-                                    .background(WhatsAppGreenAccent)
-                                    .align(Alignment.BottomEnd)
-                            )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.width(14.dp))
-
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = contact.displayName,
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        Text(
-                            text = contact.phoneNumber,
-                            fontSize = 13.sp,
-                            color = Color.Gray
-                        )
-                        Text(
-                            text = if (contact.isRegisteredInMesh) "✓ En la malla WiFi Direct" else "No registrado",
-                            fontSize = 11.sp,
-                            color = if (contact.isRegisteredInMesh) Color(0xFF008069) else Color.Gray,
-                            fontWeight = if (contact.isRegisteredInMesh) FontWeight.Bold else FontWeight.Normal
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.width(8.dp))
-
-                    // Buttons: "Chatear" / Calls or "Invitar"
-                    if (contact.isRegisteredInMesh) {
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(4.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            IconButton(
-                                onClick = { onAudioCallClick(contact) },
-                                modifier = Modifier.size(36.dp)
+                                    .background(WhatsAppTeal.copy(alpha = 0.12f)),
+                                contentAlignment = Alignment.Center
                             ) {
                                 Icon(
+                                    imageVector = Icons.Default.Phone,
+                                    contentDescription = null,
+                                    tint = WhatsAppTeal,
+                                    modifier = Modifier.size(32.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(14.dp))
+                            Text(
+                                text = "Sin contactos disponibles",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 16.sp
+                            )
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(
+                                text = "No se encontraron contactos en la agenda del dispositivo. Puedes añadir un contacto manualmente con su número real para iniciar un chat directo por WiFi Direct.",
+                                fontSize = 13.sp,
+                                color = Color.Gray,
+                                textAlign = TextAlign.Center,
+                                lineHeight = 18.sp
+                            )
+                            Spacer(modifier = Modifier.height(16.dp))
+                            Button(
+                                onClick = onAddContactClick,
+                                colors = ButtonDefaults.buttonColors(containerColor = WhatsAppTeal),
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Icon(imageVector = Icons.Default.PersonAdd, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Añadir Contacto")
+                            }
+                        }
+                    }
+                }
+            } else {
+                LazyColumn(modifier = Modifier.fillMaxSize()) {
+                    items(filteredContacts, key = { it.phoneNumber }) { contact ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { onChatClick(contact) }
+                                .padding(horizontal = 16.dp, vertical = 10.dp)
+                                .testTag("contact_item_${contact.phoneNumber}"),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            // Contact Avatar
+                            Box {
+                                Box(
+                                    modifier = Modifier
+                                        .size(48.dp)
+                                        .clip(CircleShape)
+                                        .background(WhatsAppTeal.copy(alpha = 0.15f)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = contact.displayName.take(1).uppercase(),
+                                        fontSize = 18.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = WhatsAppTeal
+                                    )
+                                }
+                                if (contact.isConnected) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(12.dp)
+                                            .clip(CircleShape)
+                                            .background(WhatsAppGreenAccent)
+                                            .align(Alignment.BottomEnd)
+                                    )
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.width(14.dp))
+
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = contact.displayName,
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    text = contact.phoneNumber,
+                                    fontSize = 13.sp,
+                                    color = Color.Gray
+                                )
+                                Text(
+                                    text = if (contact.isConnected) "✓ Conectado en WiFi Direct" else contact.statusText,
+                                    fontSize = 11.sp,
+                                    color = if (contact.isConnected) Color(0xFF008069) else Color.Gray,
+                                    fontWeight = if (contact.isConnected) FontWeight.Bold else FontWeight.Normal
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.width(8.dp))
+
+                            // Calls or Chat icon
+                            IconButton(onClick = { onAudioCallClick(contact) }) {
+                                Icon(
                                     imageVector = Icons.Default.Call,
-                                    contentDescription = "Llamada P2P",
+                                    contentDescription = "Llamada de audio",
                                     tint = WhatsAppTeal,
                                     modifier = Modifier.size(20.dp)
                                 )
                             }
-                            IconButton(
-                                onClick = { onVideoCallClick(contact) },
-                                modifier = Modifier.size(36.dp)
-                            ) {
+                            IconButton(onClick = { onVideoCallClick(contact) }) {
                                 Icon(
                                     imageVector = Icons.Default.Videocam,
-                                    contentDescription = "Videollamada P2P",
+                                    contentDescription = "Llamada de video",
                                     tint = WhatsAppTeal,
                                     modifier = Modifier.size(22.dp)
                                 )
                             }
-                            Button(
-                                onClick = { onChatClick(contact) },
-                                colors = ButtonDefaults.buttonColors(containerColor = WhatsAppTeal),
-                                shape = RoundedCornerShape(8.dp),
-                                modifier = Modifier.testTag("chat_button_${contact.phoneNumber}")
-                            ) {
-                                Text(text = "Chatear", fontSize = 12.sp)
+                            IconButton(onClick = { onChatClick(contact) }) {
+                                Icon(
+                                    imageVector = Icons.Default.Chat,
+                                    contentDescription = "Abrir chat",
+                                    tint = WhatsAppTeal,
+                                    modifier = Modifier.size(20.dp)
+                                )
                             }
                         }
-                    } else {
-                        OutlinedButton(
-                            onClick = { onInviteClick(contact) },
-                            shape = RoundedCornerShape(8.dp),
-                            modifier = Modifier.testTag("invite_button_${contact.phoneNumber}")
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.PersonAdd,
-                                contentDescription = null,
-                                modifier = Modifier.size(14.dp),
-                                tint = WhatsAppTeal
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(text = "Invitar", fontSize = 12.sp, color = WhatsAppTeal)
-                        }
+                        HorizontalDivider(
+                            modifier = Modifier.padding(start = 78.dp, end = 16.dp),
+                            color = Color.LightGray.copy(alpha = 0.2f)
+                        )
                     }
                 }
-
-                HorizontalDivider(
-                    modifier = Modifier.padding(start = 78.dp),
-                    thickness = 0.5.dp,
-                    color = Color.LightGray.copy(alpha = 0.3f)
-                )
             }
         }
     }

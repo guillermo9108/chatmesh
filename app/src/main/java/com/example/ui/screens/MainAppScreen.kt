@@ -23,7 +23,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.example.data.entity.ContactEntity
+import com.example.ui.components.AddContactDialog
+import com.example.ui.components.GitHubInfoDialog
+import com.example.ui.components.SimConfigDialog
 import com.example.ui.components.WhatsAppTopBar
 import com.example.ui.viewmodel.ChatMeshViewModel
 
@@ -34,31 +36,35 @@ fun MainAppScreen(
 ) {
     val context = LocalContext.current
 
-    // Observe ViewModel states
     val userProfile by viewModel.userProfile.collectAsStateWithLifecycle()
     val chatContacts by viewModel.chatContacts.collectAsStateWithLifecycle()
     val allContacts by viewModel.allContacts.collectAsStateWithLifecycle()
     val meshNodes by viewModel.meshNodes.collectAsStateWithLifecycle()
     val calls by viewModel.calls.collectAsStateWithLifecycle()
     val engineState by viewModel.engineState.collectAsStateWithLifecycle()
+    val realSimDetails by viewModel.realSimDetails.collectAsStateWithLifecycle()
     val selectedContact by viewModel.selectedContact.collectAsStateWithLifecycle()
     val activeMessages by viewModel.activeMessages.collectAsStateWithLifecycle()
     val searchQuery by viewModel.searchQuery.collectAsStateWithLifecycle()
 
     var selectedTabIndex by remember { mutableIntStateOf(0) }
     var showProfileDialog by remember { mutableStateOf(false) }
+    var showSimConfigDialog by remember { mutableStateOf(false) }
+    var showAddContactDialog by remember { mutableStateOf(false) }
     var showGitHubDialog by remember { mutableStateOf(false) }
 
-    // Request necessary runtime permissions
+    // Request necessary runtime permissions for real WiFi Direct, SIM reading, contacts, audio
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
     ) { _ ->
         viewModel.refreshContacts()
+        viewModel.reloadSimDetails()
     }
 
     LaunchedEffect(Unit) {
         val permissionsToRequest = mutableListOf(
             Manifest.permission.ACCESS_FINE_LOCATION,
+            Manifest.permission.READ_PHONE_STATE,
             Manifest.permission.READ_CONTACTS,
             Manifest.permission.RECORD_AUDIO,
             Manifest.permission.CAMERA
@@ -66,8 +72,8 @@ fun MainAppScreen(
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             permissionsToRequest.add(Manifest.permission.NEARBY_WIFI_DEVICES)
             permissionsToRequest.add(Manifest.permission.READ_PHONE_NUMBERS)
-        } else {
-            permissionsToRequest.add(Manifest.permission.READ_PHONE_STATE)
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            permissionsToRequest.add(Manifest.permission.READ_PHONE_NUMBERS)
         }
 
         val missing = permissionsToRequest.filter {
@@ -129,7 +135,7 @@ fun MainAppScreen(
                         onSearchClick = { selectedTabIndex = 2 },
                         onProfileClick = { showProfileDialog = true },
                         onSyncContactsClick = { viewModel.refreshContacts() },
-                        onToggleSimClick = { viewModel.toggleSimulationMode() },
+                        onSimConfigClick = { showSimConfigDialog = true },
                         onGitHubClick = { showGitHubDialog = true },
                         unreadChatsCount = unreadTotal,
                         connectedNodesCount = meshNodes.size,
@@ -141,13 +147,17 @@ fun MainAppScreen(
                             contacts = chatContacts,
                             activeTypingPhone = engineState.activeTypingContactPhone,
                             onContactClick = { contact -> viewModel.selectContact(contact) },
-                            onFabClick = { selectedTabIndex = 2 }
+                            onFabClick = { showAddContactDialog = true }
                         )
                         1 -> MeshNodesTab(
                             engineState = engineState,
+                            simInfo = realSimDetails,
                             meshNodes = meshNodes,
                             onNodeChatClick = { contact -> viewModel.selectContact(contact) },
-                            onToggleSimulation = { viewModel.toggleSimulationMode() },
+                            onEditSimClick = { showSimConfigDialog = true },
+                            onReCreateGroup = { viewModel.reCreateWiFiDirectGroup() },
+                            onScanPeers = { viewModel.scanP2pPeers() },
+                            onConnectPeer = { device -> viewModel.connectToP2pDevice(device) },
                             onGitHubClick = { showGitHubDialog = true }
                         )
                         2 -> ContactsTab(
@@ -157,7 +167,9 @@ fun MainAppScreen(
                             onChatClick = { contact -> viewModel.selectContact(contact) },
                             onInviteClick = { contact -> viewModel.inviteContact(contact) },
                             onAudioCallClick = { contact -> viewModel.startAudioCall(contact) },
-                            onVideoCallClick = { contact -> viewModel.startVideoCall(contact) }
+                            onVideoCallClick = { contact -> viewModel.startVideoCall(contact) },
+                            onAddContactClick = { showAddContactDialog = true },
+                            onRefreshContacts = { viewModel.refreshContacts() }
                         )
                         3 -> CallsTab(
                             calls = calls,
@@ -182,9 +194,33 @@ fun MainAppScreen(
             )
         }
 
+        // Real SIM Configuration Dialog
+        if (showSimConfigDialog) {
+            SimConfigDialog(
+                simInfo = realSimDetails,
+                currentPhone = userProfile?.phoneNumber ?: realSimDetails.phoneNumber ?: "",
+                onConfirm = { confirmedNumber ->
+                    viewModel.saveRealSimPhoneNumber(confirmedNumber)
+                    showSimConfigDialog = false
+                },
+                onDismiss = { showSimConfigDialog = false }
+            )
+        }
+
+        // Add Direct Contact Dialog
+        if (showAddContactDialog) {
+            AddContactDialog(
+                onAdd = { name, phone ->
+                    viewModel.addNewManualContact(name, phone)
+                    showAddContactDialog = false
+                },
+                onDismiss = { showAddContactDialog = false }
+            )
+        }
+
         // GitHub Actions & Releases Info Dialog
         if (showGitHubDialog) {
-            com.example.ui.components.GitHubInfoDialog(
+            GitHubInfoDialog(
                 onDismiss = { showGitHubDialog = false }
             )
         }

@@ -6,6 +6,12 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.media.AudioAttributes
+import android.media.AudioFormat
+import android.media.AudioManager
+import android.media.AudioRecord
+import android.media.AudioTrack
+import android.media.MediaRecorder
 import android.net.wifi.aware.AttachCallback
 import android.net.wifi.aware.DiscoverySessionCallback
 import android.net.wifi.aware.PeerHandle
@@ -20,8 +26,11 @@ import android.net.wifi.p2p.WifiP2pDevice
 import android.net.wifi.p2p.WifiP2pGroup
 import android.net.wifi.p2p.WifiP2pInfo
 import android.net.wifi.p2p.WifiP2pManager
+import android.net.wifi.p2p.nsd.WifiP2pDnsSdServiceInfo
+import android.net.wifi.p2p.nsd.WifiP2pDnsSdServiceRequest
 import android.os.Build
 import android.util.Log
+import com.example.data.entity.CallEntity
 import com.example.data.entity.ContactEntity
 import com.example.data.entity.MeshNodeEntity
 import com.example.data.entity.MessageEntity
@@ -35,10 +44,12 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.io.PrintWriter
+import java.net.DatagramPacket
+import java.net.DatagramSocket
+import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.net.Socket
@@ -49,9 +60,13 @@ data class MeshEngineState(
     val isWifiAwareActive: Boolean = false,
     val isGroupOwner: Boolean = false,
     val ssid: String = "",
+    val passphrase: String = "",
+    val p2pInterface: String = "",
+    val localIpAddress: String = "192.168.49.1",
     val myPhoneNumber: String = "",
     val myNodeId: String = "",
     val connectedPeersCount: Int = 0,
+    val discoveredP2pDevices: List<WifiP2pDevice> = emptyList(),
     val packetsSent: Long = 0,
     val packetsReceived: Long = 0,
     val packetsRelayed: Long = 0,
@@ -61,7 +76,6 @@ data class MeshEngineState(
     val callDurationSeconds: Int = 0,
     val isMicMuted: Boolean = false,
     val isSpeakerOn: Boolean = true,
-    val isSimulationActive: Boolean = true,
     val activeTypingContactPhone: String? = null,
     val activeRecordingContactPhone: String? = null
 )
@@ -76,32 +90,42 @@ class WiFiMeshEngine(
     private val _engineState = MutableStateFlow(MeshEngineState())
     val engineState: StateFlow<MeshEngineState> = _engineState.asStateFlow()
 
-    // WiFi Direct components
+    // Real WiFi Direct components
     private var p2pManager: WifiP2pManager? = null
     private var p2pChannel: WifiP2pManager.Channel? = null
     private var isP2pReceiverRegistered = false
 
-    // WiFi Aware components
+    // Real WiFi Aware components
     private var awareManager: WifiAwareManager? = null
     private var awareSession: WifiAwareSession? = null
     private var publishSession: PublishDiscoverySession? = null
     private var subscribeSession: SubscribeDiscoverySession? = null
     private val awarePeerHandles = ConcurrentHashMap<String, PeerHandle>()
 
-    // Local TCP Server for P2P Mesh
+    // Real Sockets
     private var serverSocket: ServerSocket? = null
+    private var udpDiscoverySocket: DatagramSocket? = null
     private val activeClientSockets = ConcurrentHashMap<String, Socket>()
+    private val peerIpByPhone = ConcurrentHashMap<String, String>()
 
     // Loop prevention & Packet deduplication
     private val processedPacketUuids = ConcurrentHashMap.newKeySet<String>()
 
-    // Heartbeat & mesh maintenance
+    // Background jobs
     private var meshMaintenanceJob: Job? = null
+    private var udpBeaconJob: Job? = null
     private var callTimerJob: Job? = null
+    private var audioRecordJob: Job? = null
+    private var audioPlayJob: Job? = null
+
+    // Audio stream port
+    private val AUDIO_UDP_PORT = 8890
+    private val TCP_MESH_PORT = 8888
+    private val UDP_BEACON_PORT = 8889
 
     fun initialize(myPhone: String, myNickname: String) {
         val mySsid = SimDetectionUtil.generateSsid(myPhone)
-        val myNodeId = "NODE_" + myPhone.replace("+", "")
+        val myNodeId = "NODE_" + (if (myPhone.isNotBlank()) myPhone.replace("+", "") else System.currentTimeMillis().toString())
 
         _engineState.value = _engineState.value.copy(
             myPhoneNumber = myPhone,
@@ -109,57 +133,174 @@ class WiFiMeshEngine(
             ssid = mySsid
         )
 
-        setupWifiP2p(mySsid)
-        setupWifiAware(mySsid)
-        startLocalMeshServer()
+        setupRealWifiP2p(mySsid)
+        setupRealWifiAware(mySsid)
+        startRealTcpMeshServer()
+        startRealUdpBeaconListener()
         startMeshMaintenanceLoop()
     }
 
     /**
-     * Requirement 1: Creación automática de red WiFi Direct con SSID generado por la SIM
+     * Requirement 1: Creación real de red WiFi Direct
      */
     @SuppressLint("MissingPermission")
-    private fun setupWifiP2p(ssid: String) {
+    private fun setupRealWifiP2p(ssid: String) {
         try {
             p2pManager = context.getSystemService(Context.WIFI_P2P_SERVICE) as? WifiP2pManager
             if (p2pManager == null) {
-                Log.w(TAG, "WiFi P2P no soportado en este hardware, modo malla virtual disponible")
+                Log.w(TAG, "WiFi Direct no disponible en este hardware")
                 return
             }
 
             p2pChannel = p2pManager?.initialize(context, context.mainLooper, null)
 
             registerP2pReceiver()
+            setDeviceP2pName(ssid)
 
-            // Automatically create WiFi Direct group with multiple client capacity
-            p2pManager?.createGroup(p2pChannel, object : WifiP2pManager.ActionListener {
-                override fun onSuccess() {
-                    Log.i(TAG, "Grupo WiFi Direct creado exitosamente con SSID: $ssid")
-                    _engineState.value = _engineState.value.copy(
-                        isWifiDirectActive = true,
-                        isGroupOwner = true
-                    )
-                }
+            // Setup real DNS-SD Service Discovery
+            setupP2pDnsSdService(ssid)
 
-                override fun onFailure(reason: Int) {
-                    Log.w(TAG, "Fallo al crear grupo WiFi Direct ($reason), intentando descubrimiento")
-                    startP2pDiscovery()
-                }
-            })
+            // Create autonomous group
+            createAutonomousP2pGroup(ssid)
         } catch (e: Exception) {
-            Log.e(TAG, "Error inicializando WiFi P2P", e)
+            Log.e(TAG, "Error iniciando WiFi Direct real", e)
         }
     }
 
     @SuppressLint("MissingPermission")
-    private fun startP2pDiscovery() {
+    fun reCreateP2pGroup() {
+        val currentSsid = _engineState.value.ssid
+        p2pManager?.removeGroup(p2pChannel, object : WifiP2pManager.ActionListener {
+            override fun onSuccess() {
+                createAutonomousP2pGroup(currentSsid)
+            }
+            override fun onFailure(reason: Int) {
+                createAutonomousP2pGroup(currentSsid)
+            }
+        })
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun createAutonomousP2pGroup(ssid: String) {
+        p2pManager?.createGroup(p2pChannel, object : WifiP2pManager.ActionListener {
+            override fun onSuccess() {
+                Log.i(TAG, "Grupo WiFi Direct real creado exitosamente")
+                _engineState.value = _engineState.value.copy(
+                    isWifiDirectActive = true,
+                    isGroupOwner = true
+                )
+                requestGroupAndConnectionDetails()
+            }
+
+            override fun onFailure(reason: Int) {
+                Log.w(TAG, "createGroup falló (código $reason), iniciando descubrimiento de pares")
+                startP2pDiscovery()
+            }
+        })
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun requestGroupAndConnectionDetails() {
+        p2pManager?.requestGroupInfo(p2pChannel) { group: WifiP2pGroup? ->
+            if (group != null) {
+                _engineState.value = _engineState.value.copy(
+                    ssid = group.networkName ?: _engineState.value.ssid,
+                    passphrase = group.passphrase ?: "",
+                    p2pInterface = group.`interface` ?: "",
+                    isGroupOwner = group.isGroupOwner
+                )
+                // Register connected clients
+                for (client in group.clientList) {
+                    handleDiscoveredP2pDevice(client, isConnected = true)
+                }
+            }
+        }
+
+        p2pManager?.requestConnectionInfo(p2pChannel) { info: WifiP2pInfo? ->
+            if (info != null && info.groupFormed) {
+                val ownerIp = info.groupOwnerAddress?.hostAddress ?: "192.168.49.1"
+                _engineState.value = _engineState.value.copy(
+                    isWifiDirectActive = true,
+                    isGroupOwner = info.isGroupOwner,
+                    localIpAddress = if (info.isGroupOwner) ownerIp else _engineState.value.localIpAddress
+                )
+                if (!info.isGroupOwner) {
+                    connectToMeshSocket(ownerIp, TCP_MESH_PORT)
+                }
+            }
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    fun startP2pDiscovery() {
         try {
             p2pManager?.discoverPeers(p2pChannel, object : WifiP2pManager.ActionListener {
                 override fun onSuccess() {
+                    Log.d(TAG, "discoverPeers iniciado exitosamente")
                     _engineState.value = _engineState.value.copy(isWifiDirectActive = true)
                 }
-                override fun onFailure(reason: Int) {}
+                override fun onFailure(reason: Int) {
+                    Log.w(TAG, "discoverPeers falló: $reason")
+                }
             })
+            p2pManager?.discoverServices(p2pChannel, null)
+        } catch (_: Exception) {}
+    }
+
+    @SuppressLint("MissingPermission")
+    fun connectToPeer(device: WifiP2pDevice) {
+        val config = WifiP2pConfig().apply {
+            deviceAddress = device.deviceAddress
+        }
+        p2pManager?.connect(p2pChannel, config, object : WifiP2pManager.ActionListener {
+            override fun onSuccess() {
+                Log.i(TAG, "Conexión iniciada con ${device.deviceName}")
+            }
+            override fun onFailure(reason: Int) {
+                Log.w(TAG, "Fallo al conectar con ${device.deviceName}: $reason")
+            }
+        })
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun setDeviceP2pName(name: String) {
+        try {
+            val method = p2pManager?.javaClass?.getMethod(
+                "setDeviceName",
+                WifiP2pManager.Channel::class.java,
+                String::class.java,
+                WifiP2pManager.ActionListener::class.java
+            )
+            method?.invoke(p2pManager, p2pChannel, name, null)
+        } catch (_: Exception) {}
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun setupP2pDnsSdService(ssid: String) {
+        try {
+            val record = mapOf(
+                "phone" to _engineState.value.myPhoneNumber,
+                "ssid" to ssid,
+                "node" to _engineState.value.myNodeId,
+                "port" to TCP_MESH_PORT.toString()
+            )
+            val serviceInfo = WifiP2pDnsSdServiceInfo.newInstance("ChatMesh", "_chatmesh._tcp", record)
+            p2pManager?.addLocalService(p2pChannel, serviceInfo, null)
+
+            val serviceRequest = WifiP2pDnsSdServiceRequest.newInstance()
+            p2pManager?.setDnsSdResponseListeners(p2pChannel,
+                { _, _, device ->
+                    handleDiscoveredP2pDevice(device, isConnected = false)
+                },
+                { _, txtRecordMap, device ->
+                    val phone = txtRecordMap["phone"] ?: ""
+                    val remoteSsid = txtRecordMap["ssid"] ?: device.deviceName
+                    if (phone.isNotBlank()) {
+                        registerNodeFromDnsSd(phone, remoteSsid, device.deviceAddress)
+                    }
+                }
+            )
+            p2pManager?.addServiceRequest(p2pChannel, serviceRequest, null)
         } catch (_: Exception) {}
     }
 
@@ -184,81 +325,100 @@ class WiFiMeshEngine(
             when (intent?.action) {
                 WifiP2pManager.WIFI_P2P_STATE_CHANGED_ACTION -> {
                     val state = intent.getIntExtra(WifiP2pManager.EXTRA_WIFI_STATE, -1)
-                    val enabled = state == WifiP2pManager.WIFI_P2P_STATE_ENABLED
-                    _engineState.value = _engineState.value.copy(isWifiDirectActive = enabled)
+                    _engineState.value = _engineState.value.copy(
+                        isWifiDirectActive = (state == WifiP2pManager.WIFI_P2P_STATE_ENABLED)
+                    )
                 }
                 WifiP2pManager.WIFI_P2P_PEERS_CHANGED_ACTION -> {
                     p2pManager?.requestPeers(p2pChannel) { peers ->
                         peers?.deviceList?.let { deviceList ->
-                            handleDiscoveredP2pPeers(deviceList)
+                            _engineState.value = _engineState.value.copy(
+                                discoveredP2pDevices = deviceList.toList()
+                            )
+                            for (device in deviceList) {
+                                handleDiscoveredP2pDevice(device, isConnected = false)
+                            }
                         }
                     }
                 }
                 WifiP2pManager.WIFI_P2P_CONNECTION_CHANGED_ACTION -> {
-                    p2pManager?.requestConnectionInfo(p2pChannel) { info ->
-                        handleConnectionInfo(info)
-                    }
+                    requestGroupAndConnectionDetails()
                 }
             }
         }
     }
 
-    private fun handleDiscoveredP2pPeers(deviceList: Collection<WifiP2pDevice>) {
+    private fun handleDiscoveredP2pDevice(device: WifiP2pDevice, isConnected: Boolean) {
         scope.launch {
-            for (device in deviceList) {
-                val devName = device.deviceName ?: "Dispositivo"
-                val phone = if (devName.startsWith("ChatMesh_")) {
-                    devName.removePrefix("ChatMesh_")
-                } else {
-                    "+535" + kotlin.math.abs(device.deviceAddress.hashCode() % 9000000 + 1000000)
-                }
+            val devName = device.deviceName ?: "Dispositivo WiFi Direct"
+            val phone = if (devName.startsWith("ChatMesh_")) {
+                devName.removePrefix("ChatMesh_")
+            } else {
+                ""
+            }
 
-                val node = MeshNodeEntity(
-                    nodeId = "NODE_" + device.deviceAddress.replace(":", ""),
-                    ssid = devName,
-                    phoneNumber = phone,
-                    nickname = devName,
-                    ipAddress = "192.168.49.20", // Typical WiFi Direct client subnet
-                    port = 8888,
-                    connectionType = "WIFI_DIRECT",
-                    isDirectNeighbor = true,
-                    hopDistance = 1,
-                    lastSeen = System.currentTimeMillis(),
-                    isActive = true
-                )
-                repository.saveMeshNode(node)
+            val node = MeshNodeEntity(
+                nodeId = "NODE_" + device.deviceAddress.replace(":", ""),
+                ssid = devName,
+                phoneNumber = phone.ifEmpty { "P2P:" + device.deviceAddress.takeLast(8) },
+                nickname = devName,
+                ipAddress = if (isConnected) "192.168.49.20" else "",
+                port = TCP_MESH_PORT,
+                connectionType = "WIFI_DIRECT",
+                isDirectNeighbor = true,
+                hopDistance = 1,
+                lastSeen = System.currentTimeMillis(),
+                isActive = isConnected
+            )
+            repository.saveMeshNode(node)
+
+            if (phone.isNotBlank()) {
+                val contact = repository.getContact(phone)
+                if (contact != null) {
+                    repository.saveContact(contact.copy(isRegisteredInMesh = true, isConnected = isConnected))
+                }
             }
         }
     }
 
-    private fun handleConnectionInfo(info: WifiP2pInfo?) {
-        if (info == null) return
-        _engineState.value = _engineState.value.copy(
-            isGroupOwner = info.isGroupOwner,
-            isWifiDirectActive = info.groupFormed
-        )
+    private fun registerNodeFromDnsSd(phone: String, ssid: String, macAddress: String) {
+        scope.launch {
+            val node = MeshNodeEntity(
+                nodeId = "NODE_" + macAddress.replace(":", ""),
+                ssid = ssid,
+                phoneNumber = phone,
+                nickname = ssid,
+                ipAddress = "192.168.49.20",
+                port = TCP_MESH_PORT,
+                connectionType = "WIFI_DIRECT_DNS_SD",
+                isDirectNeighbor = true,
+                hopDistance = 1,
+                lastSeen = System.currentTimeMillis(),
+                isActive = true
+            )
+            repository.saveMeshNode(node)
 
-        if (info.groupFormed && !info.isGroupOwner && info.groupOwnerAddress != null) {
-            // Connect socket client to Group Owner
-            connectToMeshSocket(info.groupOwnerAddress.hostAddress ?: "192.168.49.1", 8888)
+            val contact = repository.getContact(phone)
+            if (contact != null) {
+                repository.saveContact(contact.copy(isRegisteredInMesh = true, isConnected = true))
+            }
         }
     }
 
     /**
-     * Requirement 2: Uso de WiFi Aware (NAN) para Malla
+     * Requirement 2: Uso de WiFi Aware real (NAN)
      */
-    private fun setupWifiAware(ssid: String) {
+    private fun setupRealWifiAware(ssid: String) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
-
         try {
             if (!context.packageManager.hasSystemFeature(PackageManager.FEATURE_WIFI_AWARE)) {
-                Log.i(TAG, "WiFi Aware no presente en hardware, simulador de malla activo")
+                Log.i(TAG, "WiFi Aware (NAN) no soportado en este chip")
                 return
             }
 
             awareManager = context.getSystemService(Context.WIFI_AWARE_SERVICE) as? WifiAwareManager
             if (awareManager?.isAvailable == true) {
-                attachWifiAware(ssid)
+                attachRealWifiAware(ssid)
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error iniciando WiFi Aware", e)
@@ -266,15 +426,15 @@ class WiFiMeshEngine(
     }
 
     @SuppressLint("MissingPermission")
-    private fun attachWifiAware(ssid: String) {
+    private fun attachRealWifiAware(ssid: String) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         try {
             awareManager?.attach(object : AttachCallback() {
                 override fun onAttached(session: WifiAwareSession?) {
                     awareSession = session
                     _engineState.value = _engineState.value.copy(isWifiAwareActive = true)
-                    publishAwareService(ssid)
-                    subscribeAwareService()
+                    publishRealAwareService(ssid)
+                    subscribeRealAwareService()
                 }
 
                 override fun onAttachFailed() {
@@ -285,7 +445,7 @@ class WiFiMeshEngine(
     }
 
     @SuppressLint("MissingPermission")
-    private fun publishAwareService(ssid: String) {
+    private fun publishRealAwareService(ssid: String) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val config = PublishConfig.Builder()
             .setServiceName("ChatMeshOffline")
@@ -308,7 +468,7 @@ class WiFiMeshEngine(
     }
 
     @SuppressLint("MissingPermission")
-    private fun subscribeAwareService() {
+    private fun subscribeRealAwareService() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val config = SubscribeConfig.Builder()
             .setServiceName("ChatMeshOffline")
@@ -320,22 +480,23 @@ class WiFiMeshEngine(
             }
 
             override fun onServiceDiscovered(peerHandle: PeerHandle, serviceSpecificInfo: ByteArray?, matchFilter: MutableList<ByteArray>?) {
-                val discoveredSsid = if (serviceSpecificInfo != null) String(serviceSpecificInfo) else "ChatMesh_Desconocido"
-                val phone = if (discoveredSsid.startsWith("ChatMesh_")) {
-                    discoveredSsid.removePrefix("ChatMesh_")
-                } else "+535" + (1000000..9999999).random()
-
+                val discoveredSsid = if (serviceSpecificInfo != null) String(serviceSpecificInfo) else "ChatMesh_Peer"
+                val phone = if (discoveredSsid.startsWith("ChatMesh_")) discoveredSsid.removePrefix("ChatMesh_") else ""
                 val peerNodeId = "AWARE_" + peerHandle.hashCode()
                 awarePeerHandles[peerNodeId] = peerHandle
+
+                if (phone.isNotBlank()) {
+                    awarePeerHandles[phone] = peerHandle
+                }
 
                 scope.launch {
                     val node = MeshNodeEntity(
                         nodeId = peerNodeId,
                         ssid = discoveredSsid,
-                        phoneNumber = phone,
+                        phoneNumber = phone.ifEmpty { "AWARE_${peerHandle.hashCode()}" },
                         nickname = discoveredSsid,
                         ipAddress = "192.168.49.1",
-                        port = 8888,
+                        port = TCP_MESH_PORT,
                         connectionType = "WIFI_AWARE",
                         isDirectNeighbor = true,
                         hopDistance = 1,
@@ -344,10 +505,11 @@ class WiFiMeshEngine(
                     )
                     repository.saveMeshNode(node)
 
-                    // Mark contact registered
-                    val contact = repository.getContact(phone)
-                    if (contact != null) {
-                        repository.saveContact(contact.copy(isRegisteredInMesh = true, isConnected = true, lastSeen = System.currentTimeMillis()))
+                    if (phone.isNotBlank()) {
+                        val contact = repository.getContact(phone)
+                        if (contact != null) {
+                            repository.saveContact(contact.copy(isRegisteredInMesh = true, isConnected = true, lastSeen = System.currentTimeMillis()))
+                        }
                     }
                 }
             }
@@ -355,35 +517,40 @@ class WiFiMeshEngine(
     }
 
     /**
-     * Requirement 1 & 6: Servidor de Sockets local para entrega y enrutamiento en malla
+     * Requirement 1 & 6: Servidor TCP y sockets P2P reales
      */
-    private fun startLocalMeshServer() {
+    private fun startRealTcpMeshServer() {
         scope.launch {
             try {
-                serverSocket = ServerSocket(8888)
+                serverSocket = ServerSocket(TCP_MESH_PORT)
+                Log.i(TAG, "Servidor TCP Malla activo en puerto $TCP_MESH_PORT")
                 while (isActive) {
                     val socket = serverSocket?.accept() ?: break
                     handleClientSocket(socket)
                 }
             } catch (e: Exception) {
-                Log.d(TAG, "Server socket detenido o reiniciado: ${e.message}")
+                Log.d(TAG, "Servidor TCP cerrado: ${e.message}")
             }
         }
     }
 
     private fun handleClientSocket(socket: Socket) {
         scope.launch {
+            val remoteIp = socket.inetAddress.hostAddress ?: ""
+            activeClientSockets[remoteIp] = socket
             try {
                 val reader = BufferedReader(InputStreamReader(socket.getInputStream()))
                 while (isActive && !socket.isClosed) {
                     val line = reader.readLine() ?: break
                     val packet = MeshPacket.fromJson(line)
                     if (packet != null) {
+                        peerIpByPhone[packet.sourcePhone] = remoteIp
                         processIncomingPacket(packet)
                     }
                 }
             } catch (_: Exception) {
             } finally {
+                activeClientSockets.remove(remoteIp)
                 try { socket.close() } catch (_: Exception) {}
             }
         }
@@ -393,31 +560,127 @@ class WiFiMeshEngine(
         scope.launch {
             try {
                 val socket = Socket()
-                socket.connect(InetSocketAddress(host, port), 3000)
-                activeClientSockets["$host:$port"] = socket
+                socket.connect(InetSocketAddress(host, port), 4000)
+                activeClientSockets[host] = socket
 
                 // Send Handshake
                 val handshake = MeshPacket(
                     packetType = "HANDSHAKE",
                     sourceNodeId = _engineState.value.myNodeId,
                     sourcePhone = _engineState.value.myPhoneNumber,
-                    sourceName = "Mi Dispositivo",
+                    sourceName = _engineState.value.ssid,
                     sourceSsid = _engineState.value.ssid,
                     destinationPhone = "BROADCAST"
                 )
                 val writer = PrintWriter(socket.getOutputStream(), true)
                 writer.println(handshake.toJson())
 
-                // Listen for responses
                 handleClientSocket(socket)
             } catch (e: Exception) {
-                Log.d(TAG, "No se pudo conectar a peer socket $host:$port: ${e.message}")
+                Log.d(TAG, "No se pudo conectar a $host:$port: ${e.message}")
             }
         }
     }
 
     /**
-     * Requirement 6: Entrega y retransmisión de mensajes en malla nodo a nodo
+     * Descubrimiento UDP broadcast en la subred de WiFi Direct (192.168.49.255)
+     */
+    private fun startRealUdpBeaconListener() {
+        scope.launch {
+            try {
+                udpDiscoverySocket = DatagramSocket(UDP_BEACON_PORT)
+                udpDiscoverySocket?.broadcast = true
+                val buffer = ByteArray(2048)
+
+                while (isActive) {
+                    val packet = DatagramPacket(buffer, buffer.size)
+                    udpDiscoverySocket?.receive(packet)
+                    val senderIp = packet.address.hostAddress ?: continue
+                    val msg = String(packet.data, 0, packet.length)
+                    val meshPacket = MeshPacket.fromJson(msg)
+
+                    if (meshPacket != null && meshPacket.sourcePhone != _engineState.value.myPhoneNumber) {
+                        peerIpByPhone[meshPacket.sourcePhone] = senderIp
+
+                        // Register peer in database
+                        val node = MeshNodeEntity(
+                            nodeId = meshPacket.sourceNodeId,
+                            ssid = meshPacket.sourceSsid,
+                            phoneNumber = meshPacket.sourcePhone,
+                            nickname = meshPacket.sourceName,
+                            ipAddress = senderIp,
+                            port = TCP_MESH_PORT,
+                            connectionType = "WIFI_DIRECT_UDP",
+                            isDirectNeighbor = true,
+                            hopDistance = 1,
+                            lastSeen = System.currentTimeMillis(),
+                            isActive = true
+                        )
+                        repository.saveMeshNode(node)
+
+                        // Connect TCP client socket if not already open
+                        if (!activeClientSockets.containsKey(senderIp)) {
+                            connectToMeshSocket(senderIp, TCP_MESH_PORT)
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Log.d(TAG, "UDP Beacon listener cerrado: ${e.message}")
+            }
+        }
+    }
+
+    private fun startMeshMaintenanceLoop() {
+        meshMaintenanceJob = scope.launch {
+            while (isActive) {
+                delay(6000)
+                // 1. Send UDP beacon across WiFi Direct subnet
+                sendUdpDiscoveryBeacon()
+
+                // 2. Discover peers
+                if (p2pManager != null && p2pChannel != null) {
+                    startP2pDiscovery()
+                }
+
+                // 3. Update count of active nodes
+                val activeNodes = repository.getActiveNodes()
+                _engineState.value = _engineState.value.copy(
+                    connectedPeersCount = activeNodes.size
+                )
+            }
+        }
+    }
+
+    private fun sendUdpDiscoveryBeacon() {
+        scope.launch {
+            try {
+                val beacon = MeshPacket(
+                    packetType = "BEACON",
+                    sourceNodeId = _engineState.value.myNodeId,
+                    sourcePhone = _engineState.value.myPhoneNumber,
+                    sourceName = _engineState.value.ssid,
+                    sourceSsid = _engineState.value.ssid,
+                    destinationPhone = "BROADCAST"
+                )
+                val data = beacon.toJson().toByteArray()
+                val broadcastIps = listOf("192.168.49.255", "255.255.255.255")
+
+                val sock = DatagramSocket()
+                sock.broadcast = true
+                for (targetIp in broadcastIps) {
+                    try {
+                        val addr = InetAddress.getByName(targetIp)
+                        val pack = DatagramPacket(data, data.size, addr, UDP_BEACON_PORT)
+                        sock.send(pack)
+                    } catch (_: Exception) {}
+                }
+                sock.close()
+            } catch (_: Exception) {}
+        }
+    }
+
+    /**
+     * Requirement 6: Envío real de mensajes a la malla
      */
     fun sendChatMessage(
         recipientPhone: String,
@@ -432,7 +695,6 @@ class WiFiMeshEngine(
             val myPhone = _engineState.value.myPhoneNumber
             val myNodeId = _engineState.value.myNodeId
 
-            // 1. Guardar en BD local con estado PENDING
             val messageEntity = MessageEntity(
                 messageUuid = messageUuid,
                 senderPhone = myPhone,
@@ -449,13 +711,12 @@ class WiFiMeshEngine(
             )
             repository.saveMessage(messageEntity)
 
-            // 2. Construir paquete Mesh
             val packet = MeshPacket(
                 packetType = "CHAT_MESSAGE",
                 packetUuid = messageUuid,
                 sourceNodeId = myNodeId,
                 sourcePhone = myPhone,
-                sourceName = "Mi Dispositivo",
+                sourceName = _engineState.value.ssid,
                 sourceSsid = _engineState.value.ssid,
                 destinationPhone = recipientPhone,
                 content = content,
@@ -466,7 +727,6 @@ class WiFiMeshEngine(
                 visitedNodeIds = listOf(myNodeId)
             )
 
-            // 3. Transmitir a la malla (Sockets, WiFi Aware o Simulación)
             transmitMeshPacket(packet)
 
             _engineState.value = _engineState.value.copy(
@@ -479,7 +739,7 @@ class WiFiMeshEngine(
         scope.launch {
             val json = packet.toJson()
 
-            // A. Send over active client sockets
+            // 1. Transmit via active TCP sockets
             for ((_, socket) in activeClientSockets) {
                 try {
                     if (!socket.isClosed) {
@@ -489,30 +749,29 @@ class WiFiMeshEngine(
                 } catch (_: Exception) {}
             }
 
-            // B. Send via WiFi Aware peer session if available
+            // 2. Transmit via WiFi Aware if peer handle is known
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && awareSession != null) {
-                for ((_, handle) in awarePeerHandles) {
+                val handle = awarePeerHandles[packet.destinationPhone]
+                if (handle != null) {
                     try {
                         publishSession?.sendMessage(handle, 1, json.toByteArray())
                     } catch (_: Exception) {}
+                } else {
+                    for ((_, h) in awarePeerHandles) {
+                        try {
+                            publishSession?.sendMessage(h, 1, json.toByteArray())
+                        } catch (_: Exception) {}
+                    }
                 }
-            }
-
-            // C. In simulation mode (for emulator / demo), simulate mesh delivery and realistic responses
-            if (_engineState.value.isSimulationActive) {
-                handleSimulatedMeshRelay(packet)
             }
         }
     }
 
-    /**
-     * Procesar paquete recibido desde la malla
-     */
     private fun processIncomingPacket(packet: MeshPacket) {
         scope.launch {
             val uuid = packet.packetUuid
             if (processedPacketUuids.contains(uuid)) {
-                return@launch // Already processed, drop to prevent infinite loops
+                return@launch
             }
             processedPacketUuids.add(uuid)
 
@@ -526,7 +785,6 @@ class WiFiMeshEngine(
             when (packet.packetType) {
                 "CHAT_MESSAGE" -> {
                     if (isForMe) {
-                        // Guardar en la base de datos
                         val msg = MessageEntity(
                             messageUuid = packet.packetUuid,
                             senderPhone = packet.sourcePhone,
@@ -542,25 +800,22 @@ class WiFiMeshEngine(
                         )
                         repository.saveMessage(msg)
 
-                        // Enviar ACK de entrega de vuelta por la malla
+                        // Send real ACK back
                         sendAck(packet.packetUuid, packet.sourcePhone)
                     } else if (packet.hopCount < packet.maxHops) {
-                        // Requirement 6: Re-transmitir nodo a nodo (Mesh Relay)
                         relayPacket(packet)
                     }
                 }
                 "ACK" -> {
-                    // Update message status to DELIVERED or READ
                     repository.updateMessageStatus(packet.content, "DELIVERED")
                 }
-                "HANDSHAKE" -> {
-                    // Update contact and mesh node registry
+                "BEACON", "HANDSHAKE" -> {
                     val node = MeshNodeEntity(
                         nodeId = packet.sourceNodeId,
                         ssid = packet.sourceSsid,
                         phoneNumber = packet.sourcePhone,
                         nickname = packet.sourceName,
-                        ipAddress = "192.168.49.1",
+                        ipAddress = peerIpByPhone[packet.sourcePhone] ?: "192.168.49.20",
                         connectionType = "WIFI_DIRECT",
                         isDirectNeighbor = true,
                         hopDistance = 1,
@@ -569,21 +824,20 @@ class WiFiMeshEngine(
                     )
                     repository.saveMeshNode(node)
 
-                    // Flush pending messages for this node (Store & Forward)
+                    // Flush pending Store & Forward messages
                     val pending = repository.getPendingMessagesForRecipient(packet.sourcePhone)
                     for (msg in pending) {
                         sendChatMessage(msg.recipientPhone, msg.content, msg.mediaType, msg.mediaUri, msg.mediaBase64, msg.audioDurationSeconds)
                     }
                 }
                 "STATUS_UPDATE" -> {
-                    val status = packet.statusType
-                    if (status == "TYPING") {
+                    if (packet.statusType == "TYPING") {
                         _engineState.value = _engineState.value.copy(activeTypingContactPhone = packet.sourcePhone)
                         delay(2500)
                         if (_engineState.value.activeTypingContactPhone == packet.sourcePhone) {
                             _engineState.value = _engineState.value.copy(activeTypingContactPhone = null)
                         }
-                    } else if (status == "RECORDING") {
+                    } else if (packet.statusType == "RECORDING") {
                         _engineState.value = _engineState.value.copy(activeRecordingContactPhone = packet.sourcePhone)
                         delay(3500)
                         if (_engineState.value.activeRecordingContactPhone == packet.sourcePhone) {
@@ -618,7 +872,7 @@ class WiFiMeshEngine(
             packetType = "ACK",
             sourceNodeId = _engineState.value.myNodeId,
             sourcePhone = _engineState.value.myPhoneNumber,
-            sourceName = "Mi Dispositivo",
+            sourceName = _engineState.value.ssid,
             sourceSsid = _engineState.value.ssid,
             destinationPhone = recipientPhone,
             content = originalUuid
@@ -627,7 +881,7 @@ class WiFiMeshEngine(
     }
 
     /**
-     * Requirement 3: Llamadas de audio y video P2P
+     * Requirement 3: Llamadas P2P reales con transmisión de audio
      */
     fun startCall(contact: ContactEntity, isVideo: Boolean) {
         _engineState.value = _engineState.value.copy(
@@ -639,12 +893,11 @@ class WiFiMeshEngine(
             isSpeakerOn = true
         )
 
-        // Send Call Offer Packet
         val offerPacket = MeshPacket(
             packetType = "CALL_SIGNAL",
             sourceNodeId = _engineState.value.myNodeId,
             sourcePhone = _engineState.value.myPhoneNumber,
-            sourceName = "Mi Dispositivo",
+            sourceName = _engineState.value.ssid,
             sourceSsid = _engineState.value.ssid,
             destinationPhone = contact.phoneNumber,
             callSignalType = "OFFER",
@@ -652,8 +905,9 @@ class WiFiMeshEngine(
         )
         transmitMeshPacket(offerPacket)
 
-        // Start call timer
         startCallTimer()
+        val peerIp = peerIpByPhone[contact.phoneNumber] ?: "192.168.49.1"
+        startRealAudioStreaming(peerIp)
     }
 
     private fun startCallTimer() {
@@ -668,27 +922,114 @@ class WiFiMeshEngine(
         }
     }
 
+    @SuppressLint("MissingPermission")
+    private fun startRealAudioStreaming(peerIp: String) {
+        val sampleRate = 16000
+        val channelConfigIn = AudioFormat.CHANNEL_IN_MONO
+        val channelConfigOut = AudioFormat.CHANNEL_OUT_MONO
+        val audioFormat = AudioFormat.ENCODING_PCM_16BIT
+        val bufferSize = AudioRecord.getMinBufferSize(sampleRate, channelConfigIn, audioFormat)
+
+        // Real Microphone Capture & UDP Transmission
+        audioRecordJob = scope.launch(Dispatchers.IO) {
+            var audioRecord: AudioRecord? = null
+            var udpSocket: DatagramSocket? = null
+            try {
+                audioRecord = AudioRecord(
+                    MediaRecorder.AudioSource.VOICE_COMMUNICATION,
+                    sampleRate,
+                    channelConfigIn,
+                    audioFormat,
+                    bufferSize * 2
+                )
+                udpSocket = DatagramSocket()
+                val targetAddr = InetAddress.getByName(peerIp)
+                val buffer = ByteArray(bufferSize)
+
+                audioRecord.startRecording()
+                while (isActive && _engineState.value.isCallActive) {
+                    if (!_engineState.value.isMicMuted) {
+                        val read = audioRecord.read(buffer, 0, buffer.size)
+                        if (read > 0) {
+                            val packet = DatagramPacket(buffer, read, targetAddr, AUDIO_UDP_PORT)
+                            udpSocket.send(packet)
+                        }
+                    } else {
+                        delay(50)
+                    }
+                }
+            } catch (_: Exception) {
+            } finally {
+                try { audioRecord?.stop() } catch (_: Exception) {}
+                try { audioRecord?.release() } catch (_: Exception) {}
+                try { udpSocket?.close() } catch (_: Exception) {}
+            }
+        }
+
+        // Real Audio Playback from incoming UDP packets
+        audioPlayJob = scope.launch(Dispatchers.IO) {
+            var audioTrack: AudioTrack? = null
+            var udpSocket: DatagramSocket? = null
+            try {
+                audioTrack = AudioTrack.Builder()
+                    .setAudioAttributes(
+                        AudioAttributes.Builder()
+                            .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
+                            .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                            .build()
+                    )
+                    .setAudioFormat(
+                        AudioFormat.Builder()
+                            .setEncoding(audioFormat)
+                            .setSampleRate(sampleRate)
+                            .setChannelMask(channelConfigOut)
+                            .build()
+                    )
+                    .setBufferSizeInBytes(bufferSize * 2)
+                    .build()
+
+                udpSocket = DatagramSocket(AUDIO_UDP_PORT)
+                val buffer = ByteArray(bufferSize)
+                audioTrack.play()
+
+                while (isActive && _engineState.value.isCallActive) {
+                    val packet = DatagramPacket(buffer, buffer.size)
+                    udpSocket.receive(packet)
+                    audioTrack.write(packet.data, 0, packet.length)
+                }
+            } catch (_: Exception) {
+            } finally {
+                try { audioTrack?.stop() } catch (_: Exception) {}
+                try { audioTrack?.release() } catch (_: Exception) {}
+                try { udpSocket?.close() } catch (_: Exception) {}
+            }
+        }
+    }
+
     fun endCall() {
         val peer = _engineState.value.activeCallPeer
         val duration = _engineState.value.callDurationSeconds
         val isVideo = _engineState.value.isVideoCall
+
+        audioRecordJob?.cancel()
+        audioPlayJob?.cancel()
+        callTimerJob?.cancel()
 
         if (peer != null) {
             val hangupPacket = MeshPacket(
                 packetType = "CALL_SIGNAL",
                 sourceNodeId = _engineState.value.myNodeId,
                 sourcePhone = _engineState.value.myPhoneNumber,
-                sourceName = "Mi Dispositivo",
+                sourceName = _engineState.value.ssid,
                 sourceSsid = _engineState.value.ssid,
                 destinationPhone = peer.phoneNumber,
                 callSignalType = "HANGUP"
             )
             transmitMeshPacket(hangupPacket)
 
-            // Save to call history
             scope.launch {
                 repository.insertCall(
-                    com.example.data.entity.CallEntity(
+                    CallEntity(
                         contactPhone = peer.phoneNumber,
                         contactName = peer.displayName,
                         isVideo = isVideo,
@@ -700,7 +1041,6 @@ class WiFiMeshEngine(
             }
         }
 
-        callTimerJob?.cancel()
         _engineState.value = _engineState.value.copy(
             activeCallPeer = null,
             isCallActive = false,
@@ -714,11 +1054,15 @@ class WiFiMeshEngine(
 
     fun toggleSpeaker() {
         _engineState.value = _engineState.value.copy(isSpeakerOn = !_engineState.value.isSpeakerOn)
+        val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+        audioManager?.isSpeakerphoneOn = _engineState.value.isSpeakerOn
     }
 
     private fun handleCallSignal(packet: MeshPacket) {
         when (packet.callSignalType) {
             "HANGUP", "REJECT" -> {
+                audioRecordJob?.cancel()
+                audioPlayJob?.cancel()
                 callTimerJob?.cancel()
                 _engineState.value = _engineState.value.copy(
                     activeCallPeer = null,
@@ -726,21 +1070,34 @@ class WiFiMeshEngine(
                     callDurationSeconds = 0
                 )
             }
-            "ANSWER" -> {
-                // Call connected
+            "OFFER" -> {
+                scope.launch {
+                    val contact = repository.getContact(packet.sourcePhone) ?: ContactEntity(
+                        phoneNumber = packet.sourcePhone,
+                        displayName = packet.sourceName,
+                        isRegisteredInMesh = true,
+                        isConnected = true
+                    )
+                    _engineState.value = _engineState.value.copy(
+                        activeCallPeer = contact,
+                        isCallActive = true,
+                        isVideoCall = packet.callIsVideo,
+                        callDurationSeconds = 0
+                    )
+                    startCallTimer()
+                    val peerIp = peerIpByPhone[packet.sourcePhone] ?: "192.168.49.1"
+                    startRealAudioStreaming(peerIp)
+                }
             }
         }
     }
 
-    /**
-     * Broadcast status ("escribiendo...", "grabando audio...")
-     */
     fun sendUserStatus(recipientPhone: String, status: String) {
         val packet = MeshPacket(
             packetType = "STATUS_UPDATE",
             sourceNodeId = _engineState.value.myNodeId,
             sourcePhone = _engineState.value.myPhoneNumber,
-            sourceName = "Mi Dispositivo",
+            sourceName = _engineState.value.ssid,
             sourceSsid = _engineState.value.ssid,
             destinationPhone = recipientPhone,
             statusType = status
@@ -748,144 +1105,20 @@ class WiFiMeshEngine(
         transmitMeshPacket(packet)
     }
 
-    /**
-     * Mantenimiento de la malla: heartbeats, descubrir peers, actualizar nodos
-     */
-    private fun startMeshMaintenanceLoop() {
-        meshMaintenanceJob = scope.launch {
-            // Seed initial nodes
-            seedDefaultMeshNodes()
-
-            while (isActive) {
-                delay(12000)
-                // Discover peers periodically
-                if (p2pManager != null && p2pChannel != null) {
-                    startP2pDiscovery()
-                }
-
-                // Check and update connected peers count
-                val activeNodes = repository.getActiveNodes()
-                _engineState.value = _engineState.value.copy(
-                    connectedPeersCount = activeNodes.size
-                )
-            }
-        }
-    }
-
-    private suspend fun seedDefaultMeshNodes() {
-        val sampleNodes = listOf(
-            MeshNodeEntity(
-                nodeId = "NODE_5352345678",
-                ssid = "ChatMesh_+5352345678",
-                phoneNumber = "+5352345678",
-                nickname = "Alejandro Morales",
-                ipAddress = "192.168.49.12",
-                connectionType = "WIFI_DIRECT",
-                isDirectNeighbor = true,
-                hopDistance = 1,
-                lastSeen = System.currentTimeMillis()
-            ),
-            MeshNodeEntity(
-                nodeId = "NODE_5353456789",
-                ssid = "ChatMesh_+5353456789",
-                phoneNumber = "+5353456789",
-                nickname = "Claudia Rodríguez",
-                ipAddress = "192.168.49.15",
-                connectionType = "WIFI_AWARE",
-                isDirectNeighbor = true,
-                hopDistance = 1,
-                lastSeen = System.currentTimeMillis()
-            ),
-            MeshNodeEntity(
-                nodeId = "NODE_5357890123",
-                ssid = "ChatMesh_+5357890123",
-                phoneNumber = "+5357890123",
-                nickname = "Valeria Díaz (Repetidor)",
-                ipAddress = "192.168.49.24",
-                connectionType = "WIFI_DIRECT",
-                isDirectNeighbor = false,
-                hopDistance = 2,
-                lastSeen = System.currentTimeMillis()
-            ),
-            MeshNodeEntity(
-                nodeId = "NODE_5354567890",
-                ssid = "ChatMesh_+5354567890",
-                phoneNumber = "+5354567890",
-                nickname = "Carlos Pérez (Nodo Lejano)",
-                ipAddress = "192.168.49.33",
-                connectionType = "WIFI_AWARE",
-                isDirectNeighbor = false,
-                hopDistance = 3,
-                lastSeen = System.currentTimeMillis() - 1000 * 60 * 30
-            )
-        )
-        repository.insertAllNodes(sampleNodes)
-    }
-
-    /**
-     * Simulación inteligente de malla P2P para pruebas sin hardware físico
-     * Responde a mensajes, simula retransmisión de saltos y entrega offline
-     */
-    private fun handleSimulatedMeshRelay(packet: MeshPacket) {
-        if (packet.packetType != "CHAT_MESSAGE") return
-
-        scope.launch {
-            // First mark sent message as delivered after a short network hop delay
-            delay(1200)
-            repository.updateMessageStatus(packet.packetUuid, "DELIVERED")
-
-            delay(1500)
-            repository.updateMessageStatus(packet.packetUuid, "READ")
-
-            // Simulate realistic reply from peer if recipient is one of the active mesh contacts
-            val peerPhone = packet.destinationPhone
-            val contact = repository.getContact(peerPhone) ?: return@launch
-            if (!contact.isRegisteredInMesh) return@launch
-
-            // Peer starts typing status
-            _engineState.value = _engineState.value.copy(activeTypingContactPhone = peerPhone)
-            delay(2000)
-            _engineState.value = _engineState.value.copy(activeTypingContactPhone = null)
-
-            val replyText = when {
-                packet.mediaType == "AUDIO" -> "¡Escuché tu mensaje de voz perfectamente por la malla P2P! Se oye súper nítido."
-                packet.mediaType == "IMAGE" -> "¡Buena foto! La transferencia nodo a nodo sin Internet funcionó al instante."
-                packet.content.contains("hola", ignoreCase = true) -> "¡Hola! Estoy conectado como nodo en tu red WiFi Direct (${_engineState.value.ssid})."
-                packet.content.contains("malla", ignoreCase = true) || packet.content.contains("mesh", ignoreCase = true) ->
-                    "La red en malla está retransmitiendo paquetes a través de ${(_engineState.value.connectedPeersCount + 1)} dispositivos cercanos."
-                packet.content.contains("llamada", ignoreCase = true) -> "¡Claro! Toca el botón de llamada arriba para probar el enlace de audio P2P."
-                else -> "Recibido en mi nodo. Retransmitiendo mensaje a los demás dispositivos de la malla."
-            }
-
-            val replyMsg = MessageEntity(
-                messageUuid = java.util.UUID.randomUUID().toString(),
-                senderPhone = peerPhone,
-                recipientPhone = _engineState.value.myPhoneNumber,
-                content = replyText,
-                mediaType = "TEXT",
-                timestamp = System.currentTimeMillis(),
-                status = "READ",
-                hopCount = (1..2).random(),
-                isOutgoing = false
-            )
-            repository.saveMessage(replyMsg)
-        }
-    }
-
-    fun toggleSimulation() {
-        val newSim = !_engineState.value.isSimulationActive
-        _engineState.value = _engineState.value.copy(isSimulationActive = newSim)
-    }
-
     fun cleanUp() {
         try {
+            audioRecordJob?.cancel()
+            audioPlayJob?.cancel()
+            meshMaintenanceJob?.cancel()
+            callTimerJob?.cancel()
+            udpBeaconJob?.cancel()
+
             if (isP2pReceiverRegistered) {
                 context.unregisterReceiver(p2pReceiver)
                 isP2pReceiverRegistered = false
             }
             serverSocket?.close()
-            meshMaintenanceJob?.cancel()
-            callTimerJob?.cancel()
+            udpDiscoverySocket?.close()
             p2pManager?.removeGroup(p2pChannel, null)
         } catch (_: Exception) {}
     }

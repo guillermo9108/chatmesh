@@ -13,14 +13,12 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material.icons.filled.WifiTethering
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.TabRowDefaults
@@ -41,8 +39,8 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.ui.theme.WhatsAppTeal
 import com.example.ui.theme.WhatsAppGreenAccent
+import com.example.ui.theme.WhatsAppTeal
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -52,7 +50,7 @@ fun WhatsAppTopBar(
     onSearchClick: () -> Unit,
     onProfileClick: () -> Unit,
     onSyncContactsClick: () -> Unit,
-    onToggleSimClick: () -> Unit,
+    onSimConfigClick: () -> Unit,
     onGitHubClick: () -> Unit,
     unreadChatsCount: Int,
     connectedNodesCount: Int,
@@ -127,24 +125,24 @@ fun WhatsAppTopBar(
                     onDismissRequest = { menuExpanded = false }
                 ) {
                     DropdownMenuItem(
-                        text = { Text("Mi Perfil & SIM") },
+                        text = { Text("Configurar Tarjeta SIM Real") },
+                        onClick = {
+                            menuExpanded = false
+                            onSimConfigClick()
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Mi Perfil & Nombre") },
                         onClick = {
                             menuExpanded = false
                             onProfileClick()
                         }
                     )
                     DropdownMenuItem(
-                        text = { Text("Actualizar Contactos") },
+                        text = { Text("Sincronizar Contactos") },
                         onClick = {
                             menuExpanded = false
                             onSyncContactsClick()
-                        }
-                    )
-                    DropdownMenuItem(
-                        text = { Text("Alternar Simulación de Malla") },
-                        onClick = {
-                            menuExpanded = false
-                            onToggleSimClick()
                         }
                     )
                     DropdownMenuItem(

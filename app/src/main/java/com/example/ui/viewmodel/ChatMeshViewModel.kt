@@ -1,9 +1,11 @@
 package com.example.ui.viewmodel
 
 import android.app.Application
+import android.net.wifi.p2p.WifiP2pDevice
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.db.ChatMeshDatabase
+import com.example.data.entity.CallEntity
 import com.example.data.entity.ContactEntity
 import com.example.data.entity.MeshNodeEntity
 import com.example.data.entity.MessageEntity
@@ -11,6 +13,7 @@ import com.example.data.entity.UserProfile
 import com.example.data.repository.ChatMeshRepository
 import com.example.mesh.ContactSyncUtil
 import com.example.mesh.MeshEngineState
+import com.example.mesh.SimCardInfo
 import com.example.mesh.SimDetectionUtil
 import com.example.mesh.WiFiMeshEngine
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -29,8 +32,11 @@ class ChatMeshViewModel(application: Application) : AndroidViewModel(application
     val chatContacts: StateFlow<List<ContactEntity>>
     val allContacts: StateFlow<List<ContactEntity>>
     val meshNodes: StateFlow<List<MeshNodeEntity>>
-    val calls: StateFlow<List<com.example.data.entity.CallEntity>>
+    val calls: StateFlow<List<CallEntity>>
     val engineState: StateFlow<MeshEngineState>
+
+    private val _realSimDetails = MutableStateFlow(SimDetectionUtil.getRealSimDetails(application))
+    val realSimDetails: StateFlow<SimCardInfo> = _realSimDetails.asStateFlow()
 
     private val _selectedContact = MutableStateFlow<ContactEntity?>(null)
     val selectedContact: StateFlow<ContactEntity?> = _selectedContact.asStateFlow()
@@ -69,12 +75,20 @@ class ChatMeshViewModel(application: Application) : AndroidViewModel(application
 
         engineState = meshEngine.engineState
 
-        // First-launch initialization: check or create UserProfile with SIM detection
+        // Real SIM Detection & Engine Initialization
         viewModelScope.launch {
+            val sim = SimDetectionUtil.getRealSimDetails(application)
+            _realSimDetails.value = sim
+
             val existing = repository.getUserProfile()
-            val phone = existing?.phoneNumber ?: SimDetectionUtil.detectSimPhoneNumber(application)
+            val phone = when {
+                !existing?.phoneNumber.isNullOrBlank() -> existing!!.phoneNumber
+                !sim.phoneNumber.isNullOrBlank() -> sim.phoneNumber!!
+                else -> ""
+            }
+
             val ssid = SimDetectionUtil.generateSsid(phone)
-            val nickname = existing?.nickname ?: "Usuario Mesh"
+            val nickname = existing?.nickname ?: if (sim.carrierName.isNotBlank()) "Usuario (${sim.carrierName})" else "Usuario WiFi Direct"
 
             if (existing == null) {
                 val newProfile = UserProfile(
@@ -87,11 +101,26 @@ class ChatMeshViewModel(application: Application) : AndroidViewModel(application
                 repository.saveUserProfile(newProfile)
             }
 
-            // Start Mesh Engine
             meshEngine.initialize(phone, nickname)
-
-            // Auto-sync contacts
             ContactSyncUtil.syncDeviceContacts(application, repository, phone)
+        }
+    }
+
+    fun reloadSimDetails() {
+        val sim = SimDetectionUtil.getRealSimDetails(getApplication())
+        _realSimDetails.value = sim
+    }
+
+    fun saveRealSimPhoneNumber(number: String) {
+        viewModelScope.launch {
+            val clean = SimDetectionUtil.sanitizePhoneNumber(number)
+            SimDetectionUtil.saveUserSimPhoneNumber(getApplication(), clean)
+            reloadSimDetails()
+
+            val current = userProfile.value
+            val nickname = current?.nickname ?: "Usuario"
+            updateProfile(nickname, clean)
+            meshEngine.reCreateP2pGroup()
         }
     }
 
@@ -176,12 +205,27 @@ class ChatMeshViewModel(application: Application) : AndroidViewModel(application
 
     fun inviteContact(contact: ContactEntity) {
         viewModelScope.launch {
-            // Register or activate contact in mesh database
             val updated = contact.copy(
                 isRegisteredInMesh = true,
-                statusText = "Invitación enviada vía P2P / SMS"
+                statusText = "Invitado a conectar en WiFi Direct"
             )
             repository.saveContact(updated)
+        }
+    }
+
+    fun addNewManualContact(displayName: String, phoneNumber: String) {
+        viewModelScope.launch {
+            val cleanPhone = SimDetectionUtil.sanitizePhoneNumber(phoneNumber)
+            val newContact = ContactEntity(
+                phoneNumber = cleanPhone,
+                displayName = displayName.ifBlank { cleanPhone },
+                isRegisteredInMesh = true,
+                isConnected = false,
+                lastSeen = 0L,
+                statusText = "Contacto agregado directamente"
+            )
+            repository.insertContact(newContact)
+            selectContact(newContact)
         }
     }
 
@@ -204,11 +248,20 @@ class ChatMeshViewModel(application: Application) : AndroidViewModel(application
         viewModelScope.launch {
             val phone = userProfile.value?.phoneNumber ?: ""
             ContactSyncUtil.syncDeviceContacts(getApplication(), repository, phone)
+            reloadSimDetails()
         }
     }
 
-    fun toggleSimulationMode() {
-        meshEngine.toggleSimulation()
+    fun reCreateWiFiDirectGroup() {
+        meshEngine.reCreateP2pGroup()
+    }
+
+    fun scanP2pPeers() {
+        meshEngine.startP2pDiscovery()
+    }
+
+    fun connectToP2pDevice(device: WifiP2pDevice) {
+        meshEngine.connectToPeer(device)
     }
 
     fun setRecording(isRecording: Boolean, seconds: Int = 0) {
