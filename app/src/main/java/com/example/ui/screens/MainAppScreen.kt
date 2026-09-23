@@ -47,6 +47,7 @@ fun MainAppScreen(
 
     var selectedTabIndex by remember { mutableIntStateOf(0) }
     var showProfileDialog by remember { mutableStateOf(false) }
+    var showGitHubDialog by remember { mutableStateOf(false) }
 
     // Request necessary runtime permissions
     val permissionLauncher = rememberLauncherForActivityResult(
@@ -129,6 +130,7 @@ fun MainAppScreen(
                         onProfileClick = { showProfileDialog = true },
                         onSyncContactsClick = { viewModel.refreshContacts() },
                         onToggleSimClick = { viewModel.toggleSimulationMode() },
+                        onGitHubClick = { showGitHubDialog = true },
                         unreadChatsCount = unreadTotal,
                         connectedNodesCount = meshNodes.size,
                         ssidName = engineState.ssid
@@ -145,7 +147,8 @@ fun MainAppScreen(
                             engineState = engineState,
                             meshNodes = meshNodes,
                             onNodeChatClick = { contact -> viewModel.selectContact(contact) },
-                            onToggleSimulation = { viewModel.toggleSimulationMode() }
+                            onToggleSimulation = { viewModel.toggleSimulationMode() },
+                            onGitHubClick = { showGitHubDialog = true }
                         )
                         2 -> ContactsTab(
                             contacts = allContacts,
@@ -176,6 +179,13 @@ fun MainAppScreen(
                 onSaveProfile = { name, phone ->
                     viewModel.updateProfile(name, phone)
                 }
+            )
+        }
+
+        // GitHub Actions & Releases Info Dialog
+        if (showGitHubDialog) {
+            com.example.ui.components.GitHubInfoDialog(
+                onDismiss = { showGitHubDialog = false }
             )
         }
     }

@@ -53,6 +53,7 @@ fun WhatsAppTopBar(
     onProfileClick: () -> Unit,
     onSyncContactsClick: () -> Unit,
     onToggleSimClick: () -> Unit,
+    onGitHubClick: () -> Unit,
     unreadChatsCount: Int,
     connectedNodesCount: Int,
     ssidName: String
@@ -144,6 +145,13 @@ fun WhatsAppTopBar(
                         onClick = {
                             menuExpanded = false
                             onToggleSimClick()
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("🚀 GitHub Actions & APK") },
+                        onClick = {
+                            menuExpanded = false
+                            onGitHubClick()
                         }
                     )
                 }
