@@ -22,6 +22,7 @@ import androidx.compose.material.icons.filled.Done
 import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -277,17 +278,25 @@ fun ChatBubble(
                             "DELIVERED" -> {
                                 Icon(
                                     imageVector = Icons.Default.DoneAll,
-                                    contentDescription = "Entregado",
+                                    contentDescription = "Entregado al contacto",
+                                    tint = WhatsAppTickGrey,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                            "SENT" -> {
+                                Icon(
+                                    imageVector = Icons.Default.Done,
+                                    contentDescription = "Transmitido a la malla",
                                     tint = WhatsAppTickGrey,
                                     modifier = Modifier.size(16.dp)
                                 )
                             }
                             else -> {
                                 Icon(
-                                    imageVector = Icons.Default.Done,
-                                    contentDescription = "Enviado a la malla",
-                                    tint = WhatsAppTickGrey,
-                                    modifier = Modifier.size(16.dp)
+                                    imageVector = Icons.Default.Schedule,
+                                    contentDescription = "En cola de malla (Store & Forward)",
+                                    tint = if (isDarkTheme) Color(0xFF8696A0) else Color(0xFF667781),
+                                    modifier = Modifier.size(13.dp)
                                 )
                             }
                         }

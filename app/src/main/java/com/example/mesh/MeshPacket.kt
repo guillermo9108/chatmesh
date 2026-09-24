@@ -22,7 +22,12 @@ data class MeshPacket(
     val timestamp: Long = System.currentTimeMillis(),
     val statusType: String? = null, // "TYPING", "RECORDING", "ONLINE", "IDLE"
     val callSignalType: String? = null, // "OFFER", "ANSWER", "HANGUP", "REJECT"
-    val callIsVideo: Boolean = false
+    val callIsVideo: Boolean = false,
+    val chunkIndex: Int = 0,
+    val totalChunks: Int = 1,
+    val nodeLoad: Int = 0,
+    val signalDbm: Int = 0,
+    val priority: Int = 1 // 0 = URGENT (ACK/CALL), 1 = NORMAL (CHAT/STATUS), 2 = BULK (IMAGE_CHUNK)
 ) {
     fun toJson(): String {
         val obj = JSONObject()
@@ -46,6 +51,11 @@ data class MeshPacket(
         if (statusType != null) obj.put("statusType", statusType)
         if (callSignalType != null) obj.put("callSignalType", callSignalType)
         obj.put("callIsVideo", callIsVideo)
+        obj.put("chunkIndex", chunkIndex)
+        obj.put("totalChunks", totalChunks)
+        obj.put("nodeLoad", nodeLoad)
+        obj.put("signalDbm", signalDbm)
+        obj.put("priority", priority)
         return obj.toString()
     }
 
@@ -78,7 +88,12 @@ data class MeshPacket(
                     timestamp = obj.optLong("timestamp", System.currentTimeMillis()),
                     statusType = if (obj.has("statusType")) obj.getString("statusType") else null,
                     callSignalType = if (obj.has("callSignalType")) obj.getString("callSignalType") else null,
-                    callIsVideo = obj.optBoolean("callIsVideo", false)
+                    callIsVideo = obj.optBoolean("callIsVideo", false),
+                    chunkIndex = obj.optInt("chunkIndex", 0),
+                    totalChunks = obj.optInt("totalChunks", 1),
+                    nodeLoad = obj.optInt("nodeLoad", 0),
+                    signalDbm = obj.optInt("signalDbm", 0),
+                    priority = obj.optInt("priority", 1)
                 )
             } catch (_: Exception) {
                 null

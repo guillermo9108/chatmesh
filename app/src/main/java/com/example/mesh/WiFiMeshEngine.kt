@@ -78,7 +78,26 @@ data class MeshEngineState(
     val isMicMuted: Boolean = false,
     val isSpeakerOn: Boolean = true,
     val activeTypingContactPhone: String? = null,
-    val activeRecordingContactPhone: String? = null
+    val activeRecordingContactPhone: String? = null,
+    val optimalNodeName: String? = null,
+    val autoConnectStatus: String = "Malla P2P activa y autónoma"
+)
+
+data class PeerMetric(
+    val deviceAddress: String,
+    val deviceName: String,
+    var status: Int,
+    var nodeLoad: Int = 0,
+    var lastHeartbeat: Long = System.currentTimeMillis(),
+    var isConnected: Boolean = false,
+    var estimatedHops: Int = 1
+)
+
+data class PendingRetry(
+    val packet: MeshPacket,
+    val firstSentTime: Long = System.currentTimeMillis(),
+    var retryCount: Int = 0,
+    var lastAttempt: Long = System.currentTimeMillis()
 )
 
 class WiFiMeshEngine(
@@ -109,6 +128,13 @@ class WiFiMeshEngine(
     private var udpDiscoverySocket: DatagramSocket? = null
     private val activeClientSockets = ConcurrentHashMap<String, Socket>()
     private val peerIpByPhone = ConcurrentHashMap<String, String>()
+
+    // Autonomous Network Metrics & QoS
+    private val peerMetrics = ConcurrentHashMap<String, PeerMetric>()
+    private val pendingRetries = ConcurrentHashMap<String, PendingRetry>()
+    private val pendingChunks = ConcurrentHashMap<String, ConcurrentHashMap<Int, String>>()
+    private val chunkTotals = ConcurrentHashMap<String, Int>()
+    private val chunkMetas = ConcurrentHashMap<String, MeshPacket>()
 
     // Loop prevention & Packet deduplication
     private val processedPacketUuids = ConcurrentHashMap.newKeySet<String>()
@@ -265,6 +291,97 @@ class WiFiMeshEngine(
     }
 
     @SuppressLint("MissingPermission")
+    fun evaluateAndAutoConnectToBestNode() {
+        val devices = _engineState.value.discoveredP2pDevices
+        if (devices.isEmpty()) return
+
+        // Update peer metrics cache
+        for (dev in devices) {
+            val existing = peerMetrics[dev.deviceAddress]
+            if (existing != null) {
+                existing.status = dev.status
+                existing.isConnected = (dev.status == WifiP2pDevice.CONNECTED)
+            } else {
+                peerMetrics[dev.deviceAddress] = PeerMetric(
+                    deviceAddress = dev.deviceAddress,
+                    deviceName = dev.deviceName ?: "Nodo P2P",
+                    status = dev.status,
+                    isConnected = (dev.status == WifiP2pDevice.CONNECTED)
+                )
+            }
+        }
+
+        // If currently connected to a healthy, non-saturated peer, maintain connection
+        val currentlyConnected = devices.filter { it.status == WifiP2pDevice.CONNECTED }
+        if (currentlyConnected.isNotEmpty()) {
+            val connectedDev = currentlyConnected.first()
+            val metric = peerMetrics[connectedDev.deviceAddress]
+            val lastSeenDiff = System.currentTimeMillis() - (metric?.lastHeartbeat ?: System.currentTimeMillis())
+            if (metric != null && metric.nodeLoad < 8 && lastSeenDiff < 10000) {
+                _engineState.value = _engineState.value.copy(
+                    optimalNodeName = connectedDev.deviceName ?: connectedDev.deviceAddress,
+                    autoConnectStatus = "Conectado a ${connectedDev.deviceName} (Carga: ${metric.nodeLoad} enlaces, Enlace Óptimo)"
+                )
+                return
+            }
+        }
+
+        // Filter available candidate devices (unrestricted auto-connect to best candidate)
+        val candidates = devices.filter { it.status == WifiP2pDevice.AVAILABLE }
+        if (candidates.isEmpty()) return
+
+        val bestCandidate = candidates.maxByOrNull { device ->
+            calculateCandidateScore(device)
+        }
+
+        if (bestCandidate != null) {
+            val metric = peerMetrics[bestCandidate.deviceAddress]
+            val load = metric?.nodeLoad ?: 0
+            Log.i(TAG, "⚡ Conexión automática al nodo más óptimo: ${bestCandidate.deviceName} (${bestCandidate.deviceAddress}) Carga: $load")
+            _engineState.value = _engineState.value.copy(
+                optimalNodeName = bestCandidate.deviceName ?: bestCandidate.deviceAddress,
+                autoConnectStatus = "Auto-conectando al nodo óptimo: ${bestCandidate.deviceName} (Carga: $load)"
+            )
+            connectToPeer(bestCandidate)
+        }
+    }
+
+    private fun calculateCandidateScore(device: WifiP2pDevice): Double {
+        val metric = peerMetrics[device.deviceAddress]
+        var score = 100.0
+
+        // Status bonus
+        when (device.status) {
+            WifiP2pDevice.CONNECTED -> score += 60.0
+            WifiP2pDevice.AVAILABLE -> score += 40.0
+            WifiP2pDevice.INVITED -> score += 10.0
+            else -> score -= 200.0
+        }
+
+        // Proximity indicator: ChatMesh device naming
+        if (device.deviceName?.startsWith("ChatMesh") == true) {
+            score += 35.0
+        }
+
+        // Low saturation preference: Lower node load is higher score
+        val load = metric?.nodeLoad ?: 0
+        score -= (load * 18.0)
+
+        // Lower hops is better
+        val hops = metric?.estimatedHops ?: 1
+        score -= (hops - 1) * 20.0
+
+        // Heartbeat freshness
+        if (metric != null) {
+            val ageSec = (System.currentTimeMillis() - metric.lastHeartbeat) / 1000
+            if (ageSec < 8) score += 20.0
+            else score -= (ageSec.coerceAtMost(60) * 1.5)
+        }
+
+        return score
+    }
+
+    @SuppressLint("MissingPermission")
     private fun setDeviceP2pName(name: String) {
         try {
             val method = p2pManager?.javaClass?.getMethod(
@@ -338,13 +455,15 @@ class WiFiMeshEngine(
                                 discoveredP2pDevices = deviceList.toList()
                             )
                             for (device in deviceList) {
-                                handleDiscoveredP2pDevice(device, isConnected = false)
+                                handleDiscoveredP2pDevice(device, isConnected = (device.status == WifiP2pDevice.CONNECTED))
                             }
+                            evaluateAndAutoConnectToBestNode()
                         }
                     }
                 }
                 WifiP2pManager.WIFI_P2P_CONNECTION_CHANGED_ACTION -> {
                     requestGroupAndConnectionDetails()
+                    evaluateAndAutoConnectToBestNode()
                 }
             }
         }
@@ -669,16 +788,23 @@ class WiFiMeshEngine(
     private fun startMeshMaintenanceLoop() {
         meshMaintenanceJob = scope.launch {
             while (isActive) {
-                delay(6000)
-                // 1. Send UDP beacon across WiFi Direct subnet
-                sendUdpDiscoveryBeacon()
+                delay(3000)
+                // 1. Send periodic heartbeat / beacon with current node load
+                sendHeartbeatAndBeacon()
 
-                // 2. Discover peers
+                // 2. Discover peers & auto-connect without restriction to the best candidate
                 if (p2pManager != null && p2pChannel != null) {
                     startP2pDiscovery()
+                    evaluateAndAutoConnectToBestNode()
                 }
 
-                // 3. Update count of active nodes
+                // 3. Self-healing check: detect dropped connections and failover
+                checkSelfHealingHeartbeats()
+
+                // 4. Retry Store-and-Forward pending messages
+                retryStoreAndForwardQueue()
+
+                // 5. Update count of active nodes
                 val activeNodes = repository.getActiveNodes()
                 _engineState.value = _engineState.value.copy(
                     connectedPeersCount = activeNodes.size
@@ -687,16 +813,19 @@ class WiFiMeshEngine(
         }
     }
 
-    private fun sendUdpDiscoveryBeacon() {
+    private fun sendHeartbeatAndBeacon() {
         scope.launch {
             try {
+                val currentLoad = activeClientSockets.size
                 val beacon = MeshPacket(
-                    packetType = "BEACON",
+                    packetType = "HEARTBEAT",
                     sourceNodeId = _engineState.value.myNodeId,
                     sourcePhone = _engineState.value.myPhoneNumber,
                     sourceName = _engineState.value.ssid,
                     sourceSsid = _engineState.value.ssid,
-                    destinationPhone = "BROADCAST"
+                    destinationPhone = "BROADCAST",
+                    nodeLoad = currentLoad,
+                    priority = 0
                 )
                 val data = beacon.toJson().toByteArray()
                 val broadcastIps = listOf("192.168.49.255", "255.255.255.255")
@@ -712,6 +841,71 @@ class WiFiMeshEngine(
                 }
                 sock.close()
             } catch (_: Exception) {}
+        }
+    }
+
+    private fun checkSelfHealingHeartbeats() {
+        val now = System.currentTimeMillis()
+        for ((ip, socket) in activeClientSockets) {
+            if (socket.isClosed || !socket.isConnected) {
+                try { socket.close() } catch (_: Exception) {}
+                activeClientSockets.remove(ip)
+                Log.d(TAG, "Socket cerrado detectado por auto-sanado: $ip")
+            }
+        }
+
+        for ((address, metric) in peerMetrics) {
+            if (metric.isConnected && (now - metric.lastHeartbeat) > 9000) {
+                Log.w(TAG, "Nodo $address perdió heartbeat (>9s). Iniciando auto-sanado y failover...")
+                metric.isConnected = false
+                evaluateAndAutoConnectToBestNode()
+            }
+        }
+    }
+
+    private fun retryStoreAndForwardQueue() {
+        scope.launch {
+            val now = System.currentTimeMillis()
+            val iterator = pendingRetries.iterator()
+            while (iterator.hasNext()) {
+                val entry = iterator.next()
+                val retry = entry.value
+                if (retry.retryCount > 6) {
+                    iterator.remove()
+                    continue
+                }
+
+                val backoffMs = (retry.retryCount + 1) * 3500L
+                if (now - retry.lastAttempt >= backoffMs) {
+                    retry.retryCount++
+                    retry.lastAttempt = now
+                    Log.d(TAG, "Reintentando Store & Forward para ${retry.packet.destinationPhone} (intento ${retry.retryCount})")
+                    transmitMeshPacket(retry.packet)
+                }
+            }
+
+            val pendingDb = repository.getPendingMessages()
+            for (msg in pendingDb.take(5)) {
+                if (!pendingRetries.containsKey(msg.messageUuid)) {
+                    val retryPacket = MeshPacket(
+                        packetType = "CHAT_MESSAGE",
+                        packetUuid = msg.messageUuid,
+                        sourceNodeId = _engineState.value.myNodeId,
+                        sourcePhone = _engineState.value.myPhoneNumber,
+                        sourceName = _engineState.value.ssid,
+                        sourceSsid = _engineState.value.ssid,
+                        destinationPhone = msg.recipientPhone,
+                        content = msg.content,
+                        mediaType = msg.mediaType,
+                        mediaData = msg.mediaBase64,
+                        audioDuration = msg.audioDurationSeconds,
+                        hopCount = 1,
+                        visitedNodeIds = listOf(_engineState.value.myNodeId)
+                    )
+                    pendingRetries[msg.messageUuid] = PendingRetry(retryPacket)
+                    transmitMeshPacket(retryPacket)
+                }
+            }
         }
     }
 
@@ -740,30 +934,78 @@ class WiFiMeshEngine(
                 mediaUri = mediaUri,
                 mediaBase64 = mediaData,
                 timestamp = System.currentTimeMillis(),
-                status = "PENDING",
+                status = "SENT",
                 hopCount = 0,
                 isOutgoing = true,
                 audioDurationSeconds = audioDuration
             )
             repository.saveMessage(messageEntity)
 
-            val packet = MeshPacket(
-                packetType = "CHAT_MESSAGE",
-                packetUuid = messageUuid,
-                sourceNodeId = myNodeId,
-                sourcePhone = myPhone,
-                sourceName = _engineState.value.ssid,
-                sourceSsid = _engineState.value.ssid,
-                destinationPhone = recipientPhone,
-                content = content,
-                mediaType = mediaType,
-                mediaData = mediaData,
-                audioDuration = audioDuration,
-                hopCount = 1,
-                visitedNodeIds = listOf(myNodeId)
-            )
+            if (mediaData != null && mediaData.length > 16384) {
+                val chunkSize = 16384
+                val totalChunks = (mediaData.length + chunkSize - 1) / chunkSize
+                for (i in 0 until totalChunks) {
+                    val start = i * chunkSize
+                    val end = minOf(start + chunkSize, mediaData.length)
+                    val chunkStr = mediaData.substring(start, end)
 
-            transmitMeshPacket(packet)
+                    val chunkPacket = MeshPacket(
+                        packetType = "CHAT_CHUNK",
+                        packetUuid = messageUuid,
+                        sourceNodeId = myNodeId,
+                        sourcePhone = myPhone,
+                        sourceName = _engineState.value.ssid,
+                        sourceSsid = _engineState.value.ssid,
+                        destinationPhone = recipientPhone,
+                        content = content,
+                        mediaType = mediaType,
+                        mediaData = chunkStr,
+                        audioDuration = audioDuration,
+                        hopCount = 1,
+                        visitedNodeIds = listOf(myNodeId),
+                        chunkIndex = i,
+                        totalChunks = totalChunks,
+                        priority = 2
+                    )
+                    transmitMeshPacket(chunkPacket)
+                }
+
+                val basePacket = MeshPacket(
+                    packetType = "CHAT_MESSAGE",
+                    packetUuid = messageUuid,
+                    sourceNodeId = myNodeId,
+                    sourcePhone = myPhone,
+                    sourceName = _engineState.value.ssid,
+                    sourceSsid = _engineState.value.ssid,
+                    destinationPhone = recipientPhone,
+                    content = content,
+                    mediaType = mediaType,
+                    mediaData = mediaData,
+                    audioDuration = audioDuration,
+                    hopCount = 1,
+                    visitedNodeIds = listOf(myNodeId)
+                )
+                pendingRetries[messageUuid] = PendingRetry(basePacket)
+            } else {
+                val packet = MeshPacket(
+                    packetType = "CHAT_MESSAGE",
+                    packetUuid = messageUuid,
+                    sourceNodeId = myNodeId,
+                    sourcePhone = myPhone,
+                    sourceName = _engineState.value.ssid,
+                    sourceSsid = _engineState.value.ssid,
+                    destinationPhone = recipientPhone,
+                    content = content,
+                    mediaType = mediaType,
+                    mediaData = mediaData,
+                    audioDuration = audioDuration,
+                    hopCount = 1,
+                    visitedNodeIds = listOf(myNodeId),
+                    priority = 1
+                )
+                transmitMeshPacket(packet)
+                pendingRetries[messageUuid] = PendingRetry(packet)
+            }
 
             _engineState.value = _engineState.value.copy(
                 packetsSent = _engineState.value.packetsSent + 1
@@ -841,6 +1083,46 @@ class WiFiMeshEngine(
             val isForMe = packet.destinationPhone == myPhone || packet.destinationPhone == "BROADCAST"
 
             when (packet.packetType) {
+                "CHAT_CHUNK" -> {
+                    if (isForMe) {
+                        val chunksMap = pendingChunks.computeIfAbsent(packet.packetUuid) { ConcurrentHashMap() }
+                        packet.mediaData?.let { chunksMap[packet.chunkIndex] = it }
+                        chunkTotals[packet.packetUuid] = packet.totalChunks
+                        chunkMetas[packet.packetUuid] = packet
+
+                        if (chunksMap.size == packet.totalChunks) {
+                            val fullMedia = (0 until packet.totalChunks).joinToString("") { chunksMap[it] ?: "" }
+                            pendingChunks.remove(packet.packetUuid)
+                            chunkTotals.remove(packet.packetUuid)
+                            val meta = chunkMetas.remove(packet.packetUuid) ?: packet
+
+                            val completeMsg = MessageEntity(
+                                messageUuid = meta.packetUuid,
+                                senderPhone = meta.sourcePhone,
+                                recipientPhone = myPhone,
+                                content = meta.content,
+                                mediaType = meta.mediaType,
+                                mediaBase64 = fullMedia,
+                                timestamp = meta.timestamp,
+                                status = "DELIVERED",
+                                hopCount = meta.hopCount,
+                                isOutgoing = false,
+                                audioDurationSeconds = meta.audioDuration
+                            )
+                            repository.saveMessage(completeMsg)
+
+                            notificationHelper.showIncomingMessageNotification(
+                                senderPhone = meta.sourcePhone,
+                                senderName = meta.sourceName,
+                                messageText = "📷 Foto recibida vía Malla P2P"
+                            )
+
+                            sendAck(meta.packetUuid, meta.sourcePhone)
+                        }
+                    } else if (packet.hopCount < packet.maxHops) {
+                        relayPacket(packet)
+                    }
+                }
                 "CHAT_MESSAGE" -> {
                     if (isForMe) {
                         val msg = MessageEntity(
@@ -879,8 +1161,25 @@ class WiFiMeshEngine(
                 }
                 "ACK" -> {
                     repository.updateMessageStatus(packet.content, "DELIVERED")
+                    pendingRetries.remove(packet.content)
                 }
-                "BEACON", "HANDSHAKE" -> {
+                "HEARTBEAT", "BEACON", "HANDSHAKE" -> {
+                    // Update peer metric load & heartbeat for optimal node selection
+                    val existing = peerMetrics[packet.sourceNodeId]
+                    if (existing != null) {
+                        existing.nodeLoad = packet.nodeLoad
+                        existing.lastHeartbeat = System.currentTimeMillis()
+                    } else {
+                        peerMetrics[packet.sourceNodeId] = PeerMetric(
+                            deviceAddress = packet.sourceNodeId,
+                            deviceName = packet.sourceName,
+                            status = WifiP2pDevice.CONNECTED,
+                            nodeLoad = packet.nodeLoad,
+                            lastHeartbeat = System.currentTimeMillis(),
+                            isConnected = true
+                        )
+                    }
+
                     val node = MeshNodeEntity(
                         nodeId = packet.sourceNodeId,
                         ssid = packet.sourceSsid,
@@ -894,6 +1193,22 @@ class WiFiMeshEngine(
                         isActive = true
                     )
                     repository.saveMeshNode(node)
+
+                    val allContacts = repository.getAllContactsList()
+                    val srcClean = packet.sourcePhone.replace("+", "")
+                    val matching = allContacts.find { c ->
+                        val cClean = c.phoneNumber.replace("+", "")
+                        cClean == srcClean || (cClean.length >= 7 && srcClean.endsWith(cClean.takeLast(8)))
+                    }
+                    if (matching != null) {
+                        repository.saveContact(
+                            matching.copy(
+                                isRegisteredInMesh = true,
+                                isConnected = true,
+                                lastSeen = System.currentTimeMillis()
+                            )
+                        )
+                    }
 
                     // Flush pending Store & Forward messages
                     val pending = repository.getPendingMessagesForRecipient(packet.sourcePhone)
