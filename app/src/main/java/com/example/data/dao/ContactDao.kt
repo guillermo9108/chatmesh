@@ -13,6 +13,9 @@ interface ContactDao {
     @Query("SELECT * FROM contacts ORDER BY isConnected DESC, lastMessageTime DESC, displayName ASC")
     fun getAllContactsFlow(): Flow<List<ContactEntity>>
 
+    @Query("SELECT * FROM contacts")
+    suspend fun getAllContactsList(): List<ContactEntity>
+
     @Query("SELECT * FROM contacts WHERE isRegisteredInMesh = 1 OR isConnected = 1 OR lastMessageText IS NOT NULL ORDER BY lastMessageTime DESC")
     fun getChatContactsFlow(): Flow<List<ContactEntity>>
 

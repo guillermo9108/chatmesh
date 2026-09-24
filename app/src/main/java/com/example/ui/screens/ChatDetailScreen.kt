@@ -1,5 +1,11 @@
 package com.example.ui.screens
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -63,6 +69,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontStyle
@@ -70,6 +77,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import com.example.R
 import com.example.data.entity.ContactEntity
 import com.example.data.entity.MessageEntity
@@ -78,6 +86,7 @@ import com.example.ui.theme.WhatsAppChatBgDark
 import com.example.ui.theme.WhatsAppChatBgLight
 import com.example.ui.theme.WhatsAppGreenAccent
 import com.example.ui.theme.WhatsAppTeal
+import com.example.util.ImageMediaUtil
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -90,7 +99,7 @@ fun ChatDetailScreen(
     activeRecordingPhone: String?,
     onBackClick: () -> Unit,
     onSendMessage: (String) -> Unit,
-    onSendImage: (String, String) -> Unit,
+    onSendImage: (String, String, String?) -> Unit,
     onSendAudio: (Int) -> Unit,
     onSendFile: (String) -> Unit,
     onAudioCallClick: () -> Unit,
@@ -98,9 +107,49 @@ fun ChatDetailScreen(
     onTypingChange: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
     var inputText by remember { mutableStateOf("") }
     var showAttachmentSheet by remember { mutableStateOf(false) }
     var menuExpanded by remember { mutableStateOf(false) }
+
+    // Real Camera Launcher
+    val cameraLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicturePreview()
+    ) { bitmap ->
+        if (bitmap != null) {
+            val file = ImageMediaUtil.saveBitmapToCache(context, bitmap)
+            val base64 = ImageMediaUtil.bitmapToBase64(bitmap)
+            onSendImage(Uri.fromFile(file).toString(), "Foto de cámara", base64)
+        }
+    }
+
+    val cameraPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        if (isGranted) {
+            cameraLauncher.launch(null)
+        }
+    }
+
+    // Real Photo / Gallery Picker (Zero-permission Android Photo Picker)
+    val photoPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia()
+    ) { uri ->
+        if (uri != null) {
+            val base64 = ImageMediaUtil.uriToBase64(context, uri)
+            onSendImage(uri.toString(), "Foto adjunta", base64)
+        }
+    }
+
+    // Real Document Picker
+    val docPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            val fileName = uri.lastPathSegment?.substringAfterLast('/') ?: "documento.pdf"
+            onSendFile(fileName)
+        }
+    }
 
     // Voice recording simulation state
     var isRecording by remember { mutableStateOf(false) }
@@ -133,7 +182,7 @@ fun ChatDetailScreen(
     val statusSubtitle = when {
         isContactRecording -> "grabando audio..."
         isContactTyping -> "escribiendo..."
-        contact.isConnected -> "en línea vía WiFi Aware"
+        contact.isConnected -> "● En línea"
         contact.isRegisteredInMesh -> "disponible en malla P2P"
         else -> "desconectado (store & forward)"
     }
@@ -419,13 +468,18 @@ fun ChatDetailScreen(
 
                         IconButton(
                             onClick = {
-                                onSendImage("android.resource://com.example/drawable/ic_app_logo", "Foto de red")
+                                val hasCam = ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
+                                if (hasCam) {
+                                    cameraLauncher.launch(null)
+                                } else {
+                                    cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+                                }
                             },
-                            modifier = Modifier.size(36.dp)
+                            modifier = Modifier.size(36.dp).testTag("camera_button")
                         ) {
                             Icon(
                                 imageVector = Icons.Default.CameraAlt,
-                                contentDescription = "Cámara",
+                                contentDescription = "Cámara real",
                                 tint = Color.Gray
                             )
                         }
@@ -492,7 +546,9 @@ fun ChatDetailScreen(
                         color = Color(0xFFAC44CF),
                         onClick = {
                             showAttachmentSheet = false
-                            onSendImage("android.resource://com.example/drawable/ic_app_logo", "Foto P2P")
+                            photoPickerLauncher.launch(
+                                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                            )
                         }
                     )
                     AttachmentOption(
@@ -501,7 +557,7 @@ fun ChatDetailScreen(
                         color = Color(0xFF5F66CD),
                         onClick = {
                             showAttachmentSheet = false
-                            onSendFile("Documento_Malla_P2P.pdf")
+                            docPickerLauncher.launch(arrayOf("*/*"))
                         }
                     )
                     AttachmentOption(

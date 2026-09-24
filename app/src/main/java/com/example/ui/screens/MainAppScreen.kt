@@ -25,6 +25,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.ui.components.AddContactDialog
 import com.example.ui.components.GitHubInfoDialog
+import com.example.ui.components.MeshSettingsDialog
 import com.example.ui.components.SimConfigDialog
 import com.example.ui.components.WhatsAppTopBar
 import com.example.ui.viewmodel.ChatMeshViewModel
@@ -52,6 +53,7 @@ fun MainAppScreen(
     var showSimConfigDialog by remember { mutableStateOf(false) }
     var showAddContactDialog by remember { mutableStateOf(false) }
     var showGitHubDialog by remember { mutableStateOf(false) }
+    var showMeshSettingsDialog by remember { mutableStateOf(false) }
 
     // Request necessary runtime permissions for real WiFi Direct, SIM reading, contacts, audio
     val permissionLauncher = rememberLauncherForActivityResult(
@@ -59,7 +61,6 @@ fun MainAppScreen(
     ) { _ ->
         viewModel.refreshContacts()
         viewModel.reloadSimDetails()
-        viewModel.onPermissionsGranted()
     }
 
     LaunchedEffect(Unit) {
@@ -73,6 +74,7 @@ fun MainAppScreen(
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             permissionsToRequest.add(Manifest.permission.NEARBY_WIFI_DEVICES)
             permissionsToRequest.add(Manifest.permission.READ_PHONE_NUMBERS)
+            permissionsToRequest.add(Manifest.permission.POST_NOTIFICATIONS)
         } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             permissionsToRequest.add(Manifest.permission.READ_PHONE_NUMBERS)
         }
@@ -111,7 +113,7 @@ fun MainAppScreen(
                     activeRecordingPhone = engineState.activeRecordingContactPhone,
                     onBackClick = { viewModel.selectContact(null) },
                     onSendMessage = { text -> viewModel.sendTextMessage(text) },
-                    onSendImage = { uri, caption -> viewModel.sendImageMessage(uri, caption) },
+                    onSendImage = { uri, caption, base64 -> viewModel.sendImageMessage(uri, caption, base64) },
                     onSendAudio = { duration -> viewModel.sendAudioVoiceMessage(duration) },
                     onSendFile = { fileName -> viewModel.sendFileMessage(fileName) },
                     onAudioCallClick = { viewModel.startAudioCall(selectedContact!!) },
@@ -133,10 +135,11 @@ fun MainAppScreen(
                     WhatsAppTopBar(
                         selectedTabIndex = selectedTabIndex,
                         onTabSelected = { selectedTabIndex = it },
-                        onSearchClick = { selectedTabIndex = 2 },
+                        onSearchClick = { selectedTabIndex = 1 },
                         onProfileClick = { showProfileDialog = true },
                         onSyncContactsClick = { viewModel.refreshContacts() },
                         onSimConfigClick = { showSimConfigDialog = true },
+                        onMeshSettingsClick = { showMeshSettingsDialog = true },
                         onGitHubClick = { showGitHubDialog = true },
                         unreadChatsCount = unreadTotal,
                         connectedNodesCount = meshNodes.size,
@@ -150,18 +153,7 @@ fun MainAppScreen(
                             onContactClick = { contact -> viewModel.selectContact(contact) },
                             onFabClick = { showAddContactDialog = true }
                         )
-                        1 -> MeshNodesTab(
-                            engineState = engineState,
-                            simInfo = realSimDetails,
-                            meshNodes = meshNodes,
-                            onNodeChatClick = { contact -> viewModel.selectContact(contact) },
-                            onEditSimClick = { showSimConfigDialog = true },
-                            onReCreateGroup = { viewModel.reCreateWiFiDirectGroup() },
-                            onScanPeers = { viewModel.scanP2pPeers() },
-                            onConnectPeer = { device -> viewModel.connectToP2pDevice(device) },
-                            onGitHubClick = { showGitHubDialog = true }
-                        )
-                        2 -> ContactsTab(
+                        1 -> ContactsTab(
                             contacts = allContacts,
                             searchQuery = searchQuery,
                             onSearchQueryChange = { viewModel.setSearchQuery(it) },
@@ -172,7 +164,7 @@ fun MainAppScreen(
                             onAddContactClick = { showAddContactDialog = true },
                             onRefreshContacts = { viewModel.refreshContacts() }
                         )
-                        3 -> CallsTab(
+                        2 -> CallsTab(
                             calls = calls,
                             onCallClick = { contact, isVideo ->
                                 if (isVideo) viewModel.startVideoCall(contact)
@@ -223,6 +215,22 @@ fun MainAppScreen(
         if (showGitHubDialog) {
             GitHubInfoDialog(
                 onDismiss = { showGitHubDialog = false }
+            )
+        }
+
+        // P2P Mesh Network Settings Dialog (Hidden from main tabs, accessible via settings)
+        if (showMeshSettingsDialog) {
+            MeshSettingsDialog(
+                engineState = engineState,
+                simInfo = realSimDetails,
+                meshNodes = meshNodes,
+                onDismiss = { showMeshSettingsDialog = false },
+                onNodeChatClick = { contact -> viewModel.selectContact(contact) },
+                onEditSimClick = { showSimConfigDialog = true },
+                onReCreateGroup = { viewModel.reCreateWiFiDirectGroup() },
+                onScanPeers = { viewModel.scanP2pPeers() },
+                onConnectPeer = { device -> viewModel.connectToP2pDevice(device) },
+                onGitHubClick = { showGitHubDialog = true }
             )
         }
     }

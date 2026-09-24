@@ -276,9 +276,9 @@ fun ContactsTab(
                                     color = Color.Gray
                                 )
                                 Text(
-                                    text = if (contact.isConnected) "✓ Conectado en WiFi Direct" else contact.statusText,
+                                    text = if (contact.isConnected) "● En línea" else if (contact.isRegisteredInMesh) "✓ Disponible en malla P2P" else contact.statusText,
                                     fontSize = 11.sp,
-                                    color = if (contact.isConnected) Color(0xFF008069) else Color.Gray,
+                                    color = if (contact.isConnected) Color(0xFF00A884) else Color.Gray,
                                     fontWeight = if (contact.isConnected) FontWeight.Bold else FontWeight.Normal
                                 )
                             }

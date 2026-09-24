@@ -1,6 +1,7 @@
 package com.example.ui.viewmodel
 
 import android.app.Application
+import android.net.Uri
 import android.net.wifi.p2p.WifiP2pDevice
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -16,6 +17,7 @@ import com.example.mesh.MeshEngineState
 import com.example.mesh.SimCardInfo
 import com.example.mesh.SimDetectionUtil
 import com.example.mesh.WiFiMeshEngine
+import com.example.util.ImageMediaUtil
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -106,10 +108,6 @@ class ChatMeshViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
-    fun onPermissionsGranted() {
-        meshEngine.onPermissionsGranted()
-    }
-
     fun reloadSimDetails() {
         val sim = SimDetectionUtil.getRealSimDetails(getApplication())
         _realSimDetails.value = sim
@@ -131,6 +129,9 @@ class ChatMeshViewModel(application: Application) : AndroidViewModel(application
     fun selectContact(contact: ContactEntity?) {
         _selectedContact.value = contact
         if (contact != null) {
+            // Requirement: Conexión automática a dispositivos conocidos al entrar al chat
+            meshEngine.autoConnectToContact(contact)
+
             viewModelScope.launch {
                 repository.markChatAsRead(contact.phoneNumber)
                 val myPhone = userProfile.value?.phoneNumber ?: ""
@@ -157,13 +158,20 @@ class ChatMeshViewModel(application: Application) : AndroidViewModel(application
         )
     }
 
-    fun sendImageMessage(imageUri: String, caption: String = "") {
+    fun sendImageMessage(imageUri: String, caption: String = "", base64Data: String? = null) {
         val contact = _selectedContact.value ?: return
+        val base64 = base64Data ?: try {
+            ImageMediaUtil.uriToBase64(getApplication(), Uri.parse(imageUri))
+        } catch (_: Exception) {
+            null
+        }
+
         meshEngine.sendChatMessage(
             recipientPhone = contact.phoneNumber,
             content = if (caption.isNotBlank()) caption else "Foto adjunta",
             mediaType = "IMAGE",
-            mediaUri = imageUri
+            mediaUri = imageUri,
+            mediaData = base64
         )
     }
 

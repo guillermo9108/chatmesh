@@ -51,6 +51,7 @@ fun WhatsAppTopBar(
     onProfileClick: () -> Unit,
     onSyncContactsClick: () -> Unit,
     onSimConfigClick: () -> Unit,
+    onMeshSettingsClick: () -> Unit,
     onGitHubClick: () -> Unit,
     unreadChatsCount: Int,
     connectedNodesCount: Int,
@@ -125,6 +126,19 @@ fun WhatsAppTopBar(
                     onDismissRequest = { menuExpanded = false }
                 ) {
                     DropdownMenuItem(
+                        text = {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.WifiTethering, contentDescription = null, tint = WhatsAppTeal, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Ajustes de Red Malla P2P", fontWeight = FontWeight.SemiBold)
+                            }
+                        },
+                        onClick = {
+                            menuExpanded = false
+                            onMeshSettingsClick()
+                        }
+                    )
+                    DropdownMenuItem(
                         text = { Text("Configurar Tarjeta SIM Real") },
                         onClick = {
                             menuExpanded = false
@@ -159,8 +173,8 @@ fun WhatsAppTopBar(
             )
         )
 
-        // WhatsApp-styled tabs
-        val tabs = listOf("CHATS", "MALLA P2P", "CONTACTOS", "LLAMADAS")
+        // WhatsApp-styled tabs (Mesh moved to Settings as requested)
+        val tabs = listOf("CHATS", "CONTACTOS", "LLAMADAS")
         TabRow(
             selectedTabIndex = selectedTabIndex,
             containerColor = WhatsAppTeal,
@@ -197,21 +211,6 @@ fun WhatsAppTopBar(
                                     Text(
                                         text = "$unreadChatsCount",
                                         color = WhatsAppTeal,
-                                        fontSize = 10.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                }
-                            } else if (index == 1 && connectedNodesCount > 0) {
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Box(
-                                    modifier = Modifier
-                                        .clip(CircleShape)
-                                        .background(WhatsAppGreenAccent)
-                                        .padding(horizontal = 5.dp, vertical = 1.dp)
-                                ) {
-                                    Text(
-                                        text = "$connectedNodesCount",
-                                        color = Color.Black,
                                         fontSize = 10.sp,
                                         fontWeight = FontWeight.Bold
                                     )

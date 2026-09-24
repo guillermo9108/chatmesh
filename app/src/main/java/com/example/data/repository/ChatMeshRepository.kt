@@ -23,6 +23,7 @@ class ChatMeshRepository(private val database: ChatMeshDatabase) {
     // Contacts
     val allContactsFlow: Flow<List<ContactEntity>> = contactDao.getAllContactsFlow()
     val chatContactsFlow: Flow<List<ContactEntity>> = contactDao.getChatContactsFlow()
+    suspend fun getAllContactsList(): List<ContactEntity> = contactDao.getAllContactsList()
     suspend fun getContact(phone: String): ContactEntity? = contactDao.getContactByPhone(phone)
     fun getContactFlow(phone: String): Flow<ContactEntity?> = contactDao.getContactFlow(phone)
     suspend fun insertContact(contact: ContactEntity) = contactDao.insertIfNotExist(contact)
