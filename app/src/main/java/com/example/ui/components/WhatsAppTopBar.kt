@@ -1,36 +1,13 @@
 package com.example.ui.components
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.WifiTethering
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.Tab
-import androidx.compose.material3.TabRow
-import androidx.compose.material3.TabRowDefaults
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material3.*
 import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
-import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -66,39 +43,27 @@ fun WhatsAppTopBar(
     ) {
         TopAppBar(
             title = {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Column {
                     Text(
                         text = "ChatMesh",
                         color = Color.White,
                         fontSize = 20.sp,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.testTag("app_title")
+                        fontWeight = FontWeight.Bold
                     )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Box(
-                        modifier = Modifier
-                            .clip(CircleShape)
-                            .background(WhatsAppGreenAccent.copy(alpha = 0.25f))
-                            .padding(horizontal = 6.dp, vertical = 2.dp)
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                imageVector = Icons.Default.WifiTethering,
-                                contentDescription = "Malla P2P",
-                                tint = WhatsAppGreenAccent,
-                                modifier = Modifier.size(12.dp)
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(
-                                text = "P2P MESH",
-                                color = Color.White,
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
+                    if (ssidName.isNotBlank()) {
+                        Text(
+                            text = ssidName,
+                            color = Color.White.copy(alpha = 0.8f),
+                            fontSize = 11.sp
+                        )
                     }
                 }
             },
+            colors = TopAppBarDefaults.topAppBarColors(
+                containerColor = WhatsAppTeal,
+                titleContentColor = Color.White,
+                actionIconContentColor = Color.White
+            ),
             actions = {
                 IconButton(
                     onClick = onSearchClick,
@@ -110,71 +75,70 @@ fun WhatsAppTopBar(
                         tint = Color.White
                     )
                 }
-                IconButton(
-                    onClick = { menuExpanded = true },
-                    modifier = Modifier.testTag("menu_button")
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.MoreVert,
-                        contentDescription = "Más opciones",
-                        tint = Color.White
-                    )
-                }
 
-                DropdownMenu(
-                    expanded = menuExpanded,
-                    onDismissRequest = { menuExpanded = false }
-                ) {
-                    DropdownMenuItem(
-                        text = {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Default.WifiTethering, contentDescription = null, tint = WhatsAppTeal, modifier = Modifier.size(18.dp))
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text("Ajustes de Red Malla P2P", fontWeight = FontWeight.SemiBold)
+                Box {
+                    IconButton(
+                        onClick = { menuExpanded = true },
+                        modifier = Modifier.testTag("menu_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.MoreVert,
+                            contentDescription = "Más opciones",
+                            tint = Color.White
+                        )
+                    }
+
+                    DropdownMenu(
+                        expanded = menuExpanded,
+                        onDismissRequest = { menuExpanded = false }
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("Mi Perfil") },
+                            leadingIcon = { Icon(Icons.Default.Person, contentDescription = null) },
+                            onClick = {
+                                menuExpanded = false
+                                onProfileClick()
                             }
-                        },
-                        onClick = {
-                            menuExpanded = false
-                            onMeshSettingsClick()
-                        }
-                    )
-                    DropdownMenuItem(
-                        text = { Text("Configurar Tarjeta SIM Real") },
-                        onClick = {
-                            menuExpanded = false
-                            onSimConfigClick()
-                        }
-                    )
-                    DropdownMenuItem(
-                        text = { Text("Mi Perfil & Nombre") },
-                        onClick = {
-                            menuExpanded = false
-                            onProfileClick()
-                        }
-                    )
-                    DropdownMenuItem(
-                        text = { Text("Sincronizar Contactos") },
-                        onClick = {
-                            menuExpanded = false
-                            onSyncContactsClick()
-                        }
-                    )
-                    DropdownMenuItem(
-                        text = { Text("🚀 GitHub Actions & APK") },
-                        onClick = {
-                            menuExpanded = false
-                            onGitHubClick()
-                        }
-                    )
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Sincronizar Contactos") },
+                            leadingIcon = { Icon(Icons.Default.Sync, contentDescription = null) },
+                            onClick = {
+                                menuExpanded = false
+                                onSyncContactsClick()
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Configuración SIM") },
+                            leadingIcon = { Icon(Icons.Default.SimCard, contentDescription = null) },
+                            onClick = {
+                                menuExpanded = false
+                                onSimConfigClick()
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Ajustes de Malla P2P") },
+                            leadingIcon = { Icon(Icons.Default.Wifi, contentDescription = null) },
+                            onClick = {
+                                menuExpanded = false
+                                onMeshSettingsClick()
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Acerca de ChatMesh") },
+                            leadingIcon = { Icon(Icons.Default.Info, contentDescription = null) },
+                            onClick = {
+                                menuExpanded = false
+                                onGitHubClick()
+                            }
+                        )
+                    }
                 }
-            },
-            colors = TopAppBarDefaults.topAppBarColors(
-                containerColor = WhatsAppTeal
-            )
+            }
         )
 
-        // WhatsApp-styled tabs (Mesh moved to Settings as requested)
-        val tabs = listOf("CHATS", "CONTACTOS", "LLAMADAS")
+        // Tab bar
+        val tabs = listOf("CHATS", "CONTACTOS", "NODOS MESH", "LLAMADAS")
         TabRow(
             selectedTabIndex = selectedTabIndex,
             containerColor = WhatsAppTeal,
@@ -191,28 +155,42 @@ fun WhatsAppTopBar(
                 Tab(
                     selected = selectedTabIndex == index,
                     onClick = { onTabSelected(index) },
-                    modifier = Modifier.testTag("tab_$index"),
                     text = {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(
                                 text = title,
-                                color = if (selectedTabIndex == index) Color.White else Color.White.copy(alpha = 0.7f),
+                                fontSize = 13.sp,
                                 fontWeight = if (selectedTabIndex == index) FontWeight.Bold else FontWeight.Medium,
-                                fontSize = 12.sp
+                                color = if (selectedTabIndex == index) Color.White else Color.White.copy(alpha = 0.7f)
                             )
                             if (index == 0 && unreadChatsCount > 0) {
-                                Spacer(modifier = Modifier.width(4.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Box(
+                                    modifier = Modifier
+                                        .clip(CircleShape)
+                                        .background(WhatsAppGreenAccent)
+                                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                                ) {
+                                    Text(
+                                        text = unreadChatsCount.toString(),
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color.Black
+                                    )
+                                }
+                            } else if (index == 2 && connectedNodesCount > 0) {
+                                Spacer(modifier = Modifier.width(6.dp))
                                 Box(
                                     modifier = Modifier
                                         .clip(CircleShape)
                                         .background(Color.White)
-                                        .padding(horizontal = 5.dp, vertical = 1.dp)
+                                        .padding(horizontal = 6.dp, vertical = 2.dp)
                                 ) {
                                     Text(
-                                        text = "$unreadChatsCount",
-                                        color = WhatsAppTeal,
+                                        text = connectedNodesCount.toString(),
                                         fontSize = 10.sp,
-                                        fontWeight = FontWeight.Bold
+                                        fontWeight = FontWeight.Bold,
+                                        color = WhatsAppTeal
                                     )
                                 }
                             }

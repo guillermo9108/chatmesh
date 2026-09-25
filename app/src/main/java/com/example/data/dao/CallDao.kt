@@ -9,11 +9,11 @@ import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface CallDao {
-    @Query("SELECT * FROM calls ORDER BY timestamp DESC")
-    fun getAllCallsFlow(): Flow<List<CallEntity>>
-
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertCall(call: CallEntity): Long
+
+    @Query("SELECT * FROM calls ORDER BY timestamp DESC")
+    fun getAllCallsFlow(): Flow<List<CallEntity>>
 
     @Query("DELETE FROM calls WHERE id = :id")
     suspend fun deleteCall(id: Long)

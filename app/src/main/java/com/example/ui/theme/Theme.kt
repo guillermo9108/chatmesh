@@ -9,38 +9,38 @@ import androidx.compose.ui.graphics.Color
 
 private val DarkColorScheme = darkColorScheme(
     primary = WhatsAppGreenLight,
-    onPrimary = Color(0xFF003822),
-    primaryContainer = Color(0xFF005234),
-    onPrimaryContainer = Color(0xFF6CF8B8),
+    onPrimary = Color(0xFF00382B),
+    primaryContainer = Color(0xFF00513F),
+    onPrimaryContainer = Color(0xFF73F8D3),
     secondary = WhatsAppGreenAccent,
     onSecondary = Color(0xFF00391A),
     background = DarkBackground,
+    onBackground = Color(0xFFE1E3DF),
     surface = DarkSurface,
+    onSurface = Color(0xFFE1E3DF),
     surfaceVariant = DarkSurfaceVariant,
-    onBackground = Color(0xFFE1E3E5),
-    onSurface = Color(0xFFE1E3E5),
-    onSurfaceVariant = Color(0xFFC3C7CE)
+    onSurfaceVariant = Color(0xFFC3C7BE)
 )
 
 private val LightColorScheme = lightColorScheme(
     primary = WhatsAppTeal,
     onPrimary = Color.White,
-    primaryContainer = Color(0xFFD3E8D8),
-    onPrimaryContainer = Color(0xFF002113),
+    primaryContainer = Color(0xFF7CF8D5),
+    onPrimaryContainer = Color(0xFF002018),
     secondary = WhatsAppGreenAccent,
     onSecondary = Color.White,
-    background = Color(0xFFFFFFFF),
-    surface = Color(0xFFFFFFFF),
-    surfaceVariant = Color(0xFFF0F2F5),
-    onBackground = Color(0xFF111B21),
-    onSurface = Color(0xFF111B21),
-    onSurfaceVariant = Color(0xFF54656F)
+    background = Color.White,
+    onBackground = Color(0xFF191C1B),
+    surface = Color.White,
+    onSurface = Color(0xFF191C1B),
+    surfaceVariant = Color(0xFFDBE5DE),
+    onSurfaceVariant = Color(0xFF3F4945)
 )
 
 @Composable
-fun MyApplicationTheme(
+fun ChatMeshTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
-    dynamicColor: Boolean = false, // Keep authentic WhatsApp look
+    dynamicColor: Boolean = false,
     content: @Composable () -> Unit
 ) {
     val colorScheme = if (darkTheme) DarkColorScheme else LightColorScheme
@@ -49,4 +49,13 @@ fun MyApplicationTheme(
         typography = Typography,
         content = content
     )
+}
+
+@Composable
+fun MyApplicationTheme(
+    darkTheme: Boolean = isSystemInDarkTheme(),
+    dynamicColor: Boolean = false,
+    content: @Composable () -> Unit
+) {
+    ChatMeshTheme(darkTheme = darkTheme, dynamicColor = dynamicColor, content = content)
 }

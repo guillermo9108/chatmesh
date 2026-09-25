@@ -13,16 +13,17 @@ import androidx.room.PrimaryKey
     ]
 )
 data class MessageEntity(
-    @PrimaryKey(autoGenerate = true) val id: Long = 0L,
+    @PrimaryKey(autoGenerate = true)
+    val id: Long = 0,
     val messageUuid: String,
     val senderPhone: String,
     val recipientPhone: String,
     val content: String,
-    val mediaType: String = "TEXT", // "TEXT", "IMAGE", "AUDIO", "FILE"
+    val mediaType: String = "TEXT",
     val mediaUri: String? = null,
     val mediaBase64: String? = null,
     val timestamp: Long = System.currentTimeMillis(),
-    val status: String = "PENDING", // "PENDING", "SENT", "DELIVERED", "READ"
+    val status: String = "PENDING",
     val hopCount: Int = 0,
     val isOutgoing: Boolean = true,
     val audioDurationSeconds: Int = 0

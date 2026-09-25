@@ -12,15 +12,8 @@ import com.example.MainActivity
 import com.example.R
 
 class NotificationHelper(private val context: Context) {
-
-    private val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-
-    companion object {
-        const val CHANNEL_MESSAGES_ID = "chatmesh_p2p_messages"
-        const val CHANNEL_CALLS_ID = "chatmesh_p2p_calls"
-        private const val NOTIFICATION_ID_BASE_MESSAGES = 1000
-        private const val NOTIFICATION_ID_CALLS = 2000
-    }
+    private val notificationManager =
+        context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
 
     init {
         createNotificationChannels()
@@ -46,8 +39,7 @@ class NotificationHelper(private val context: Context) {
                 description = "Notificaciones de llamadas entrantes de voz y video en WiFi Direct"
                 enableVibration(true)
                 enableLights(true)
-                val defaultRingtone = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
-                setSound(defaultRingtone, null)
+                setSound(RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE), null)
             }
 
             notificationManager.createNotificationChannel(messageChannel)
@@ -55,16 +47,11 @@ class NotificationHelper(private val context: Context) {
         }
     }
 
-    fun showIncomingMessageNotification(
-        senderPhone: String,
-        senderName: String,
-        messageText: String
-    ) {
+    fun showIncomingMessageNotification(senderPhone: String, senderName: String, messageText: String) {
         val intent = Intent(context, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
             putExtra("EXTRA_CONTACT_PHONE", senderPhone)
         }
-
         val pendingIntent = PendingIntent.getActivity(
             context,
             senderPhone.hashCode(),
@@ -73,10 +60,11 @@ class NotificationHelper(private val context: Context) {
         )
 
         val soundUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+        val title = if (senderName.isNotEmpty()) senderName else senderPhone
 
         val notification = NotificationCompat.Builder(context, CHANNEL_MESSAGES_ID)
             .setSmallIcon(R.drawable.ic_app_logo)
-            .setContentTitle(senderName.ifEmpty { senderPhone })
+            .setContentTitle(title)
             .setContentText(messageText)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setCategory(NotificationCompat.CATEGORY_MESSAGE)
@@ -86,21 +74,16 @@ class NotificationHelper(private val context: Context) {
             .setContentIntent(pendingIntent)
             .build()
 
-        val notificationId = NOTIFICATION_ID_BASE_MESSAGES + (senderPhone.hashCode() and 0x7FFF)
+        val notificationId = (senderPhone.hashCode() and 0x7FFFFFFF) + NOTIFICATION_ID_BASE_MESSAGES
         notificationManager.notify(notificationId, notification)
     }
 
-    fun showIncomingCallNotification(
-        callerPhone: String,
-        callerName: String,
-        isVideo: Boolean
-    ) {
+    fun showIncomingCallNotification(callerPhone: String, callerName: String, isVideo: Boolean) {
         val intent = Intent(context, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
             putExtra("EXTRA_CONTACT_PHONE", callerPhone)
             putExtra("EXTRA_INCOMING_CALL", true)
         }
-
         val pendingIntent = PendingIntent.getActivity(
             context,
             NOTIFICATION_ID_CALLS,
@@ -108,18 +91,46 @@ class NotificationHelper(private val context: Context) {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
+        val answerIntent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            putExtra("EXTRA_ACTION_ANSWER", true)
+            putExtra("EXTRA_CONTACT_PHONE", callerPhone)
+        }
+        val answerPendingIntent = PendingIntent.getActivity(
+            context,
+            NOTIFICATION_ID_CALLS + 1,
+            answerIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val declineIntent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            putExtra("EXTRA_ACTION_REJECT", true)
+            putExtra("EXTRA_CONTACT_PHONE", callerPhone)
+        }
+        val declinePendingIntent = PendingIntent.getActivity(
+            context,
+            NOTIFICATION_ID_CALLS + 2,
+            declineIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
         val ringtoneUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
+        val title = if (callerName.isNotEmpty()) callerName else callerPhone
 
         val notification = NotificationCompat.Builder(context, CHANNEL_CALLS_ID)
             .setSmallIcon(R.drawable.ic_app_logo)
-            .setContentTitle("📞 Llamada entrante P2P")
-            .setContentText("${callerName.ifEmpty { callerPhone }} te está llamando por WiFi Direct")
+            .setContentTitle(if (isVideo) "📹 Videollamada entrante P2P" else "📞 Llamada entrante P2P")
+            .setContentText("$title te está llamando por WiFi Direct")
             .setPriority(NotificationCompat.PRIORITY_MAX)
             .setCategory(NotificationCompat.CATEGORY_CALL)
             .setAutoCancel(true)
             .setSound(ringtoneUri)
             .setVibrate(longArrayOf(0, 500, 500, 500, 500))
             .setContentIntent(pendingIntent)
+            .setFullScreenIntent(pendingIntent, true)
+            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Rechazar", declinePendingIntent)
+            .addAction(android.R.drawable.ic_menu_call, "Responder", answerPendingIntent)
             .setOngoing(true)
             .build()
 
@@ -128,5 +139,12 @@ class NotificationHelper(private val context: Context) {
 
     fun cancelCallNotification() {
         notificationManager.cancel(NOTIFICATION_ID_CALLS)
+    }
+
+    companion object {
+        const val CHANNEL_MESSAGES_ID = "chatmesh_p2p_messages"
+        const val CHANNEL_CALLS_ID = "chatmesh_p2p_calls"
+        private const val NOTIFICATION_ID_BASE_MESSAGES = 1000
+        private const val NOTIFICATION_ID_CALLS = 2000
     }
 }

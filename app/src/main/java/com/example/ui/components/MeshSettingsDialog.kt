@@ -1,109 +1,129 @@
 package com.example.ui.components
 
-import android.net.wifi.p2p.WifiP2pDevice
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material.icons.filled.WifiTethering
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
-import com.example.data.entity.ContactEntity
-import com.example.data.entity.MeshNodeEntity
 import com.example.mesh.MeshEngineState
-import com.example.mesh.SimCardInfo
-import com.example.ui.screens.MeshNodesTab
+import com.example.ui.theme.WhatsAppGreenAccent
 import com.example.ui.theme.WhatsAppTeal
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MeshSettingsDialog(
     engineState: MeshEngineState,
-    simInfo: SimCardInfo,
-    meshNodes: List<MeshNodeEntity>,
-    onDismiss: () -> Unit,
-    onNodeChatClick: (ContactEntity) -> Unit,
-    onEditSimClick: () -> Unit,
     onReCreateGroup: () -> Unit,
     onScanPeers: () -> Unit,
-    onConnectPeer: (WifiP2pDevice) -> Unit,
-    onGitHubClick: () -> Unit
+    onDismiss: () -> Unit
 ) {
-    Dialog(
+    AlertDialog(
         onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false)
-    ) {
-        Surface(
-            modifier = Modifier.fillMaxSize(),
-            color = MaterialTheme.colorScheme.background
-        ) {
-            Column(modifier = Modifier.fillMaxSize()) {
-                TopAppBar(
-                    title = {
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.WifiTethering, contentDescription = null, tint = WhatsAppTeal)
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Ajustes de Malla P2P", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+            }
+        },
+        text = {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    text = "Estado de Enlaces Locales:",
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 14.sp
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Card(
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(12.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(
-                                imageVector = Icons.Default.WifiTethering,
+                                Icons.Default.Wifi,
                                 contentDescription = null,
-                                tint = Color.White
+                                tint = if (engineState.isWifiDirectActive) WhatsAppTeal else Color.Gray,
+                                modifier = Modifier.size(20.dp)
                             )
-                            Spacer(modifier = Modifier.width(10.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = "Ajustes de Red Malla P2P",
-                                color = Color.White,
-                                fontSize = 18.sp,
-                                fontWeight = FontWeight.Bold
+                                text = if (engineState.isWifiDirectActive) "WiFi Direct: ACTIVO" else "WiFi Direct: Inactivo",
+                                fontWeight = FontWeight.Medium,
+                                fontSize = 14.sp
                             )
                         }
-                    },
-                    navigationIcon = {
-                        IconButton(onClick = onDismiss) {
-                            Icon(
-                                imageVector = Icons.Default.Close,
-                                contentDescription = "Cerrar",
-                                tint = Color.White
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "SSID: ${engineState.ssid.ifEmpty { "Desconocido" }}",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        if (engineState.passphrase.isNotEmpty()) {
+                            Text(
+                                text = "Contraseña: ${engineState.passphrase}",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
-                    },
-                    colors = TopAppBarDefaults.topAppBarColors(containerColor = WhatsAppTeal)
-                )
+                        Text(
+                            text = "IP Local: ${engineState.localIpAddress.ifEmpty { "192.168.49.1" }}",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text(
+                            text = "Rol: ${if (engineState.isGroupOwner) "Dueño del Grupo (GO)" else "Cliente Mesh"}",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text(
+                            text = "Pares conectados: ${engineState.connectedPeersCount}",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = WhatsAppTeal
+                        )
+                    }
+                }
 
-                MeshNodesTab(
-                    engineState = engineState,
-                    simInfo = simInfo,
-                    meshNodes = meshNodes,
-                    onNodeChatClick = { contact ->
-                        onDismiss()
-                        onNodeChatClick(contact)
-                    },
-                    onEditSimClick = onEditSimClick,
-                    onReCreateGroup = onReCreateGroup,
-                    onScanPeers = onScanPeers,
-                    onConnectPeer = onConnectPeer,
-                    onGitHubClick = onGitHubClick
-                )
+                Spacer(modifier = Modifier.height(12.dp))
+                Button(
+                    onClick = onReCreateGroup,
+                    colors = ButtonDefaults.buttonColors(containerColor = WhatsAppTeal),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("recreate_group_button")
+                ) {
+                    Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Reiniciar Grupo P2P")
+                }
+
+                Spacer(modifier = Modifier.height(6.dp))
+                OutlinedButton(
+                    onClick = onScanPeers,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("scan_peers_button")
+                ) {
+                    Text("Escanear Dispositivos")
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cerrar", color = WhatsAppTeal)
             }
         }
-    }
+    )
 }

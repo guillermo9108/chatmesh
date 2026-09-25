@@ -1,41 +1,48 @@
 package com.example.ui.viewmodel
 
 import android.app.Application
-import android.net.Uri
 import android.net.wifi.p2p.WifiP2pDevice
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.db.ChatMeshDatabase
-import com.example.data.entity.CallEntity
-import com.example.data.entity.ContactEntity
-import com.example.data.entity.MeshNodeEntity
-import com.example.data.entity.MessageEntity
-import com.example.data.entity.UserProfile
+import com.example.data.entity.*
 import com.example.data.repository.ChatMeshRepository
 import com.example.mesh.ContactSyncUtil
 import com.example.mesh.MeshEngineState
 import com.example.mesh.SimCardInfo
 import com.example.mesh.SimDetectionUtil
 import com.example.mesh.WiFiMeshEngine
-import com.example.util.ImageMediaUtil
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharingStarted
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 
 class ChatMeshViewModel(application: Application) : AndroidViewModel(application) {
+    private val database = ChatMeshDatabase.getDatabase(application)
+    private val repository = ChatMeshRepository(
+        database.userDao(),
+        database.contactDao(),
+        database.messageDao(),
+        database.meshNodeDao(),
+        database.callDao()
+    )
 
-    private val repository: ChatMeshRepository
-    val meshEngine: WiFiMeshEngine
+    val meshEngine = WiFiMeshEngine(application, repository)
 
-    val userProfile: StateFlow<UserProfile?>
-    val chatContacts: StateFlow<List<ContactEntity>>
-    val allContacts: StateFlow<List<ContactEntity>>
-    val meshNodes: StateFlow<List<MeshNodeEntity>>
-    val calls: StateFlow<List<CallEntity>>
-    val engineState: StateFlow<MeshEngineState>
+    val userProfile: StateFlow<UserProfile?> = repository.userProfileFlow
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+
+    val chatContacts: StateFlow<List<ContactEntity>> = repository.chatContactsFlow
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val allContacts: StateFlow<List<ContactEntity>> = repository.allContactsFlow
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val meshNodes: StateFlow<List<MeshNodeEntity>> = repository.allMeshNodesFlow
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val calls: StateFlow<List<CallEntity>> = repository.allCallsFlow
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val engineState: StateFlow<MeshEngineState> = meshEngine.engineState
 
     private val _realSimDetails = MutableStateFlow(SimDetectionUtil.getRealSimDetails(application))
     val realSimDetails: StateFlow<SimCardInfo> = _realSimDetails.asStateFlow()
@@ -56,87 +63,53 @@ class ChatMeshViewModel(application: Application) : AndroidViewModel(application
     val recordingTimerSeconds: StateFlow<Int> = _recordingTimerSeconds.asStateFlow()
 
     init {
-        val db = ChatMeshDatabase.getInstance(application)
-        repository = ChatMeshRepository(db)
-        meshEngine = WiFiMeshEngine(application, repository)
-
-        userProfile = repository.userProfileFlow
-            .stateIn(viewModelScope, SharingStarted.Eagerly, null)
-
-        chatContacts = repository.chatContactsFlow
-            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
-
-        allContacts = repository.allContactsFlow
-            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
-
-        meshNodes = repository.allMeshNodesFlow
-            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
-
-        calls = repository.allCallsFlow
-            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
-
-        engineState = meshEngine.engineState
-
-        // Real SIM Detection & Engine Initialization
         viewModelScope.launch {
-            val sim = SimDetectionUtil.getRealSimDetails(application)
-            _realSimDetails.value = sim
-
+            val phone = SimDetectionUtil.detectSimPhoneNumber(getApplication())
             val existing = repository.getUserProfile()
-            val phone = when {
-                !existing?.phoneNumber.isNullOrBlank() -> existing!!.phoneNumber
-                !sim.phoneNumber.isNullOrBlank() -> sim.phoneNumber!!
-                else -> ""
-            }
-
-            val ssid = SimDetectionUtil.generateSsid(phone)
-            val nickname = existing?.nickname ?: if (sim.carrierName.isNotBlank()) "Usuario (${sim.carrierName})" else "Usuario WiFi Direct"
-
             if (existing == null) {
                 val newProfile = UserProfile(
-                    phoneNumber = phone,
-                    nickname = nickname,
-                    ssid = ssid,
-                    ipAddress = "192.168.49.1",
-                    registeredAt = System.currentTimeMillis()
+                    phoneNumber = if (phone.isNotEmpty()) phone else "+5300000000",
+                    nickname = "Usuario",
+                    ssid = SimDetectionUtil.generateSsid(phone)
                 )
                 repository.saveUserProfile(newProfile)
+                meshEngine.initialize(newProfile.phoneNumber, newProfile.nickname)
+            } else {
+                meshEngine.initialize(existing.phoneNumber, existing.nickname)
             }
-
-            meshEngine.initialize(phone, nickname)
-            ContactSyncUtil.syncDeviceContacts(application, repository, phone)
+            refreshContacts()
         }
     }
 
     fun reloadSimDetails() {
-        val sim = SimDetectionUtil.getRealSimDetails(getApplication())
-        _realSimDetails.value = sim
+        val details = SimDetectionUtil.getRealSimDetails(getApplication())
+        _realSimDetails.value = details
     }
 
     fun saveRealSimPhoneNumber(number: String) {
+        SimDetectionUtil.saveUserSimPhoneNumber(getApplication(), number)
+        reloadSimDetails()
         viewModelScope.launch {
-            val clean = SimDetectionUtil.sanitizePhoneNumber(number)
-            SimDetectionUtil.saveUserSimPhoneNumber(getApplication(), clean)
-            reloadSimDetails()
-
-            val current = userProfile.value
-            val nickname = current?.nickname ?: "Usuario"
-            updateProfile(nickname, clean)
-            meshEngine.reCreateP2pGroup()
+            val current = repository.getUserProfile()
+            if (current != null) {
+                repository.saveUserProfile(
+                    current.copy(
+                        phoneNumber = number,
+                        ssid = SimDetectionUtil.generateSsid(number)
+                    )
+                )
+            }
         }
     }
 
     fun selectContact(contact: ContactEntity?) {
         _selectedContact.value = contact
         if (contact != null) {
-            // Requirement: Conexión automática a dispositivos conocidos al entrar al chat
-            meshEngine.autoConnectToContact(contact)
-
             viewModelScope.launch {
                 repository.markChatAsRead(contact.phoneNumber)
-                val myPhone = userProfile.value?.phoneNumber ?: ""
-                repository.getConversationFlow(contact.phoneNumber, myPhone).collect { list ->
-                    _activeMessages.value = list
+                val myPhone = engineState.value.myPhoneNumber
+                repository.getConversationFlow(contact.phoneNumber, myPhone).collect {
+                    _activeMessages.value = it
                 }
             }
         } else {
@@ -158,20 +131,14 @@ class ChatMeshViewModel(application: Application) : AndroidViewModel(application
         )
     }
 
-    fun sendImageMessage(imageUri: String, caption: String = "", base64Data: String? = null) {
+    fun sendImageMessage(imageUri: String, caption: String, base64Data: String) {
         val contact = _selectedContact.value ?: return
-        val base64 = base64Data ?: try {
-            ImageMediaUtil.uriToBase64(getApplication(), Uri.parse(imageUri))
-        } catch (_: Exception) {
-            null
-        }
-
         meshEngine.sendChatMessage(
             recipientPhone = contact.phoneNumber,
-            content = if (caption.isNotBlank()) caption else "Foto adjunta",
+            content = caption,
             mediaType = "IMAGE",
             mediaUri = imageUri,
-            mediaData = base64
+            mediaData = base64Data
         )
     }
 
@@ -185,7 +152,7 @@ class ChatMeshViewModel(application: Application) : AndroidViewModel(application
         )
     }
 
-    fun sendFileMessage(fileName: String, fileUri: String? = null) {
+    fun sendFileMessage(fileName: String, fileUri: String) {
         val contact = _selectedContact.value ?: return
         meshEngine.sendChatMessage(
             recipientPhone = contact.phoneNumber,
@@ -203,6 +170,10 @@ class ChatMeshViewModel(application: Application) : AndroidViewModel(application
         meshEngine.startCall(contact, isVideo = true)
     }
 
+    fun answerCall() {
+        meshEngine.answerCall()
+    }
+
     fun endCall() {
         meshEngine.endCall()
     }
@@ -216,51 +187,42 @@ class ChatMeshViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun inviteContact(contact: ContactEntity) {
-        viewModelScope.launch {
-            val updated = contact.copy(
-                isRegisteredInMesh = true,
-                statusText = "Invitado a conectar en WiFi Direct"
-            )
-            repository.saveContact(updated)
-        }
+        meshEngine.autoConnectToContact(contact)
     }
 
     fun addNewManualContact(displayName: String, phoneNumber: String) {
+        val cleanPhone = SimDetectionUtil.sanitizePhoneNumber(phoneNumber)
         viewModelScope.launch {
-            val cleanPhone = SimDetectionUtil.sanitizePhoneNumber(phoneNumber)
-            val newContact = ContactEntity(
-                phoneNumber = cleanPhone,
-                displayName = displayName.ifBlank { cleanPhone },
-                isRegisteredInMesh = true,
-                isConnected = false,
-                lastSeen = 0L,
-                statusText = "Contacto agregado directamente"
+            repository.insertContact(
+                ContactEntity(
+                    phoneNumber = cleanPhone,
+                    displayName = displayName.ifBlank { cleanPhone },
+                    isRegisteredInMesh = false
+                )
             )
-            repository.insertContact(newContact)
-            selectContact(newContact)
         }
     }
 
     fun updateProfile(nickname: String, phoneNumber: String) {
+        val cleanPhone = SimDetectionUtil.sanitizePhoneNumber(phoneNumber)
         viewModelScope.launch {
-            val cleanPhone = SimDetectionUtil.sanitizePhoneNumber(phoneNumber)
-            val cleanSsid = SimDetectionUtil.generateSsid(cleanPhone)
-            val updated = UserProfile(
-                phoneNumber = cleanPhone,
-                nickname = nickname,
-                ssid = cleanSsid,
-                ipAddress = userProfile.value?.ipAddress ?: "192.168.49.1"
-            )
-            repository.saveUserProfile(updated)
-            meshEngine.initialize(cleanPhone, nickname)
+            val current = repository.getUserProfile()
+            if (current != null) {
+                repository.saveUserProfile(
+                    current.copy(
+                        nickname = nickname,
+                        phoneNumber = cleanPhone,
+                        ssid = SimDetectionUtil.generateSsid(cleanPhone)
+                    )
+                )
+            }
         }
     }
 
     fun refreshContacts() {
         viewModelScope.launch {
-            val phone = userProfile.value?.phoneNumber ?: ""
-            ContactSyncUtil.syncDeviceContacts(getApplication(), repository, phone)
-            reloadSimDetails()
+            val myPhone = engineState.value.myPhoneNumber
+            ContactSyncUtil.syncDeviceContacts(getApplication(), repository, myPhone)
         }
     }
 
@@ -281,15 +243,38 @@ class ChatMeshViewModel(application: Application) : AndroidViewModel(application
         _recordingTimerSeconds.value = seconds
         val contact = _selectedContact.value
         if (contact != null) {
-            meshEngine.sendUserStatus(contact.phoneNumber, if (isRecording) "RECORDING" else "IDLE")
+            val status = if (isRecording) "RECORDING" else "IDLE"
+            meshEngine.sendUserStatus(contact.phoneNumber, status)
         }
     }
 
     fun onUserTyping(text: String) {
         val contact = _selectedContact.value
-        if (contact != null && text.isNotEmpty()) {
-            meshEngine.sendUserStatus(contact.phoneNumber, "TYPING")
+        if (contact != null) {
+            val status = if (text.isNotBlank()) "TYPING" else "IDLE"
+            meshEngine.sendUserStatus(contact.phoneNumber, status)
         }
+    }
+
+    fun startP2pDiscovery() {
+        meshEngine.startP2pDiscovery()
+    }
+
+    fun reCreateP2pGroup() {
+        meshEngine.reCreateP2pGroup()
+    }
+
+    fun sendAudioMessage(durationSeconds: Int) {
+        sendAudioVoiceMessage(durationSeconds)
+    }
+
+    fun sendUserStatus(status: String) {
+        val contact = _selectedContact.value ?: return
+        meshEngine.sendUserStatus(contact.phoneNumber, status)
+    }
+
+    fun sendUserStatus(phoneNumber: String, status: String) {
+        meshEngine.sendUserStatus(phoneNumber, status)
     }
 
     override fun onCleared() {

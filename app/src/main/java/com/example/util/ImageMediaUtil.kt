@@ -10,11 +10,10 @@ import java.io.File
 import java.io.FileOutputStream
 
 object ImageMediaUtil {
-
     fun saveBitmapToCache(context: Context, bitmap: Bitmap): File {
         val file = File(context.cacheDir, "camera_${System.currentTimeMillis()}.jpg")
-        FileOutputStream(file).use { out ->
-            bitmap.compress(Bitmap.CompressFormat.JPEG, 85, out)
+        FileOutputStream(file).use {
+            bitmap.compress(Bitmap.CompressFormat.JPEG, 85, it)
         }
         return file
     }
@@ -29,11 +28,9 @@ object ImageMediaUtil {
             val newHeight = if (height >= width) maxDim else (maxDim / ratio).toInt()
             scaled = Bitmap.createScaledBitmap(bitmap, newWidth.coerceAtLeast(1), newHeight.coerceAtLeast(1), true)
         }
-
         val outputStream = ByteArrayOutputStream()
         scaled.compress(Bitmap.CompressFormat.JPEG, quality, outputStream)
-        val byteArray = outputStream.toByteArray()
-        return Base64.encodeToString(byteArray, Base64.NO_WRAP)
+        return Base64.encodeToString(outputStream.toByteArray(), Base64.NO_WRAP)
     }
 
     fun uriToBase64(context: Context, uri: Uri, maxDim: Int = 800, quality: Int = 75): String? {
@@ -41,11 +38,8 @@ object ImageMediaUtil {
             val inputStream = context.contentResolver.openInputStream(uri) ?: return null
             val originalBitmap = BitmapFactory.decodeStream(inputStream)
             inputStream.close()
-            if (originalBitmap != null) {
-                bitmapToBase64(originalBitmap, maxDim, quality)
-            } else {
-                null
-            }
+            if (originalBitmap == null) return null
+            bitmapToBase64(originalBitmap, maxDim, quality)
         } catch (e: Exception) {
             null
         }

@@ -1,43 +1,22 @@
-# ChatMesh 📱🌐
+<div align="center">
+<img width="1200" height="475" alt="GHBanner" src="https://ai.google.dev/static/site-assets/images/share-ais-513315318.png" />
+</div>
 
-Aplicación de chat nativa estilo WhatsApp para Android que funciona completamente **sin conexión a Internet**, utilizando exclusivamente **WiFi Aware (`WifiAwareManager`)** y **WiFi Direct (`WifiP2pManager`)** para formar una red en malla descentralizada entre dispositivos.
+# Run and deploy your AI Studio app
 
----
+This contains everything you need to run your app locally.
 
-## 🚀 Compilación y Publicación Automática (GitHub Actions)
+View your app in AI Studio: https://ai.studio/apps/1eabc8af-312e-4e62-b3b4-ddbdde777a3e
 
-El proyecto incluye un flujo de integración continua en [`.github/workflows/android.yml`](.github/workflows/android.yml) que automatiza todo el proceso:
+## Run Locally
 
-1. **Disparador:** Se activa automáticamente en cada `push` a la rama `main` (o manualmente desde la pestaña **Actions** con `workflow_dispatch`).
-2. **Compilación de Release:** Ejecuta `./gradlew assembleRelease`.
-3. **Firma Digital con Secretos:** Firma la APK utilizando los secretos configurados en tu repositorio de GitHub.
-4. **Publicación en Releases:** Crea una nueva versión en la sección **Releases** de GitHub con el archivo **`ChatMesh-release.apk`** listo para descargar e instalar.
+**Prerequisites:**  [Android Studio](https://developer.android.com/studio)
 
----
 
-### 🔑 Configuración de Secretos en GitHub (Opcional)
-
-Para firmar la APK de producción con tu propia clave (Keystore), añade los siguientes secretos en tu repositorio de GitHub (**Settings** > **Secrets and variables** > **Actions**):
-
-| Nombre del Secreto | Descripción |
-| :--- | :--- |
-| `KEYSTORE_BASE64` (o `SIGNING_KEY`) | Archivo `.jks` o `.keystore` codificado en base64 (`base64 -w 0 tu-clave.jks`) |
-| `STORE_PASSWORD` | Contraseña del almacén de claves (keystore) |
-| `KEY_ALIAS` | Alias de la clave (por defecto: `upload`) |
-| `KEY_PASSWORD` | Contraseña de la clave privada |
-
-> **Nota:** Si no configuras los secretos, el flujo de trabajo genera automáticamente una clave de respaldo para que la compilación de la APK firmada nunca falle y esté disponible de inmediato en las Releases.
-
----
-
-## 📋 Características de la Aplicación
-
-- **Creación automática de grupo WiFi Direct:** Crea la red P2P al abrir la app.
-- **SSID basado en SIM:** Genera el SSID con el número de la SIM activa (ejemplo: `ChatMesh_+5351234567`).
-- **Malla con WiFi Aware (NAN):** Anuncio y descubrimiento de pares cercanos sin depender de routers ni Internet.
-- **Enrutamiento Multi-Salto (Store & Forward):** Los paquetes viajan de salto en salto por la malla; si un contacto está desconectado, el mensaje se guarda en SQLite local y se entrega al reconectarse.
-- **Chat Estilo WhatsApp:**
-  - 4 Pestañas: Chats, Malla P2P, Contactos, Llamadas.
-  - Chat fullscreen con Texto, Fotos, Notas de voz interactivas y Archivos.
-  - Estados en tiempo real: *en línea*, *escribiendo...*, *grabando audio...*.
-  - Llamadas de audio y videollamadas directas P2P.
+1. Open Android Studio
+2. Select **Open** and choose the directory containing this project
+3. Allow Android Studio to fix any incompatibilities as it imports the project.
+4. Create a file named `.env` in the project directory and set `GEMINI_API_KEY` in that file to your Gemini API key (see `.env.example` for an example)
+5. Remove this line from the app's `build.gradle.kts` file: `signingConfig = signingConfigs.getByName("debugConfig")`
+6. Run the app on an emulator or physical device
+7. If you have already published your app in AI Studio, please [request upload key reset](https://support.google.com/googleplay/android-developer/answer/9842756#zippy=%2Crequest-an-upload-key-reset) in Google Play Console.

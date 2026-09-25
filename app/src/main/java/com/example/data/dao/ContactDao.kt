@@ -1,30 +1,11 @@
 package com.example.data.dao
 
-import androidx.room.Dao
-import androidx.room.Insert
-import androidx.room.OnConflictStrategy
-import androidx.room.Query
-import androidx.room.Update
+import androidx.room.*
 import com.example.data.entity.ContactEntity
 import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface ContactDao {
-    @Query("SELECT * FROM contacts ORDER BY isConnected DESC, lastMessageTime DESC, displayName ASC")
-    fun getAllContactsFlow(): Flow<List<ContactEntity>>
-
-    @Query("SELECT * FROM contacts")
-    suspend fun getAllContactsList(): List<ContactEntity>
-
-    @Query("SELECT * FROM contacts WHERE isRegisteredInMesh = 1 OR isConnected = 1 OR lastMessageText IS NOT NULL ORDER BY lastMessageTime DESC")
-    fun getChatContactsFlow(): Flow<List<ContactEntity>>
-
-    @Query("SELECT * FROM contacts WHERE phoneNumber = :phone LIMIT 1")
-    suspend fun getContactByPhone(phone: String): ContactEntity?
-
-    @Query("SELECT * FROM contacts WHERE phoneNumber = :phone LIMIT 1")
-    fun getContactFlow(phone: String): Flow<ContactEntity?>
-
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertIfNotExist(contact: ContactEntity): Long
 
@@ -36,6 +17,21 @@ interface ContactDao {
 
     @Update
     suspend fun update(contact: ContactEntity)
+
+    @Query("SELECT * FROM contacts ORDER BY displayName ASC")
+    fun getAllContactsFlow(): Flow<List<ContactEntity>>
+
+    @Query("SELECT * FROM contacts")
+    suspend fun getAllContactsList(): List<ContactEntity>
+
+    @Query("SELECT * FROM contacts WHERE lastMessageTime > 0 OR unreadCount > 0 ORDER BY lastMessageTime DESC")
+    fun getChatContactsFlow(): Flow<List<ContactEntity>>
+
+    @Query("SELECT * FROM contacts WHERE phoneNumber = :phone LIMIT 1")
+    suspend fun getContactByPhone(phone: String): ContactEntity?
+
+    @Query("SELECT * FROM contacts WHERE phoneNumber = :phone LIMIT 1")
+    fun getContactFlow(phone: String): Flow<ContactEntity?>
 
     @Query("UPDATE contacts SET lastMessageText = :text, lastMessageTime = :time WHERE phoneNumber = :phone")
     suspend fun updateLastMessage(phone: String, text: String, time: Long)

@@ -2,641 +2,211 @@ package com.example.ui.screens
 
 import android.net.wifi.p2p.WifiP2pDevice
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowForwardIos
-import androidx.compose.material.icons.filled.Bolt
-import androidx.compose.material.icons.filled.CellTower
-import androidx.compose.material.icons.filled.Chat
-import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.Hub
-import androidx.compose.material.icons.filled.Key
-import androidx.compose.material.icons.filled.Link
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.RocketLaunch
-import androidx.compose.material.icons.filled.Router
-import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.SimCard
-import androidx.compose.material.icons.filled.SwapHoriz
-import androidx.compose.material.icons.filled.Wifi
-import androidx.compose.material.icons.filled.WifiTethering
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Text
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.data.entity.ContactEntity
 import com.example.data.entity.MeshNodeEntity
 import com.example.mesh.MeshEngineState
-import com.example.mesh.SimCardInfo
 import com.example.ui.theme.WhatsAppGreenAccent
 import com.example.ui.theme.WhatsAppTeal
 
 @Composable
 fun MeshNodesTab(
     engineState: MeshEngineState,
-    simInfo: SimCardInfo,
     meshNodes: List<MeshNodeEntity>,
-    onNodeChatClick: (ContactEntity) -> Unit,
-    onEditSimClick: () -> Unit,
-    onReCreateGroup: () -> Unit,
     onScanPeers: () -> Unit,
-    onConnectPeer: (WifiP2pDevice) -> Unit,
-    onGitHubClick: () -> Unit = {},
+    onConnectDevice: (WifiP2pDevice) -> Unit,
     modifier: Modifier = Modifier
 ) {
     LazyColumn(
         modifier = modifier
             .fillMaxSize()
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+            .padding(16.dp)
+            .testTag("mesh_nodes_list")
     ) {
-        // Card 1: Red WiFi Direct Real
         item {
             Card(
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = WhatsAppTeal.copy(alpha = 0.08f)),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag("mesh_status_card")
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(40.dp)
-                                .clip(CircleShape)
-                                .background(WhatsAppTeal),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.WifiTethering,
-                                contentDescription = null,
-                                tint = Color.White,
-                                modifier = Modifier.size(24.dp)
-                            )
-                        }
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "Red WiFi Direct Real (P2P)",
-                                fontSize = 16.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                            Text(
-                                text = if (engineState.isWifiDirectActive) "Enlace WiFi Direct ACTIVO" else "Iniciando WiFi Direct...",
-                                fontSize = 12.sp,
-                                color = if (engineState.isWifiDirectActive) Color(0xFF008069) else Color.Gray,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(10.dp))
-
-                    // Autonomous dynamic node routing banner
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(Color(0xFF008069).copy(alpha = 0.1f))
-                            .padding(horizontal = 10.dp, vertical = 6.dp)
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                imageVector = Icons.Default.Bolt,
-                                contentDescription = null,
-                                tint = Color(0xFF008069),
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = engineState.autoConnectStatus,
-                                fontSize = 11.sp,
-                                color = Color(0xFF008069),
-                                fontWeight = FontWeight.Medium
-                            )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(14.dp))
-                    HorizontalDivider(color = Color.LightGray.copy(alpha = 0.3f))
-                    Spacer(modifier = Modifier.height(14.dp))
-
-                    // Real SSID
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Wifi,
-                            contentDescription = null,
-                            tint = WhatsAppTeal,
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Column {
-                            Text(
-                                text = "SSID de la Red WiFi Direct:",
-                                fontSize = 11.sp,
-                                color = Color.Gray
-                            )
-                            Text(
-                                text = engineState.ssid.ifEmpty { "Generando desde SIM..." },
-                                fontSize = 14.sp,
-                                fontFamily = FontFamily.Monospace,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                        }
-                    }
-
-                    // Real Passphrase if Group Owner
-                    if (engineState.passphrase.isNotBlank()) {
-                        Spacer(modifier = Modifier.height(10.dp))
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Key,
-                                contentDescription = null,
-                                tint = WhatsAppTeal,
-                                modifier = Modifier.size(20.dp)
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Column {
-                                Text(
-                                    text = "Contraseña WPA2 de la Red Directa:",
-                                    fontSize = 11.sp,
-                                    color = Color.Gray
-                                )
-                                Text(
-                                    text = engineState.passphrase,
-                                    fontSize = 13.sp,
-                                    fontFamily = FontFamily.Monospace,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color(0xFF008069)
-                                )
-                            }
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(10.dp))
-
-                    // IP & Role
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Column {
-                            Text(text = "Rol WiFi P2P", fontSize = 11.sp, color = Color.Gray)
-                            Text(
-                                text = if (engineState.isGroupOwner) "Propietario (Group Owner)" else "Cliente de Red",
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                        }
-                        Column(horizontalAlignment = Alignment.End) {
-                            Text(text = "IP Local P2P", fontSize = 11.sp, color = Color.Gray)
-                            Text(
-                                text = engineState.localIpAddress,
-                                fontSize = 12.sp,
-                                fontFamily = FontFamily.Monospace,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(14.dp))
-
-                    // Action buttons
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        OutlinedButton(
-                            onClick = onReCreateGroup,
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(8.dp)
-                        ) {
-                            Icon(imageVector = Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp), tint = WhatsAppTeal)
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Recrear Grupo", fontSize = 12.sp, color = WhatsAppTeal)
-                        }
-                        Button(
-                            onClick = onScanPeers,
-                            modifier = Modifier.weight(1f),
-                            colors = ButtonDefaults.buttonColors(containerColor = WhatsAppTeal),
-                            shape = RoundedCornerShape(8.dp)
-                        ) {
-                            Icon(imageVector = Icons.Default.Search, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Escanear Pares", fontSize = 12.sp)
-                        }
-                    }
-                }
-            }
-        }
-
-        // Card 2: Tarjeta SIM Real
-        item {
-            Card(
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = WhatsAppTeal.copy(alpha = 0.1f)
+                ),
+                shape = RoundedCornerShape(12.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(40.dp)
-                                .clip(CircleShape)
-                                .background(WhatsAppTeal.copy(alpha = 0.15f)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.SimCard,
-                                contentDescription = null,
-                                tint = WhatsAppTeal,
-                                modifier = Modifier.size(22.dp)
-                            )
-                        }
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "Tarjeta SIM Física",
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                            Text(
-                                text = "Operador: ${simInfo.carrierName} ${if (simInfo.countryIso.isNotBlank()) "(${simInfo.countryIso})" else ""}",
-                                fontSize = 12.sp,
-                                color = WhatsAppTeal
-                            )
-                        }
-                        OutlinedButton(
-                            onClick = onEditSimClick,
-                            shape = RoundedCornerShape(8.dp)
-                        ) {
-                            Icon(imageVector = Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(14.dp), tint = WhatsAppTeal)
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Editar", fontSize = 12.sp, color = WhatsAppTeal)
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(10.dp))
-                    HorizontalDivider(color = Color.LightGray.copy(alpha = 0.2f))
-                    Spacer(modifier = Modifier.height(10.dp))
-
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Column {
-                            Text(text = "Número Móvil Real:", fontSize = 11.sp, color = Color.Gray)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                Icons.Default.WifiTethering,
+                                contentDescription = null,
+                                tint = WhatsAppTeal,
+                                modifier = Modifier.size(24.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = if (simInfo.phoneNumber.isNullOrBlank()) "No configurado (Toca Editar)" else simInfo.phoneNumber,
-                                fontSize = 14.sp,
+                                text = "Red WiFi Direct Mesh",
                                 fontWeight = FontWeight.Bold,
-                                color = if (simInfo.phoneNumber.isNullOrBlank()) Color.Red else MaterialTheme.colorScheme.onSurface
+                                fontSize = 16.sp
                             )
                         }
-                        if (simInfo.isNumberReadFromSim) {
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(6.dp))
-                                    .background(WhatsAppGreenAccent.copy(alpha = 0.2f))
-                                    .padding(horizontal = 6.dp, vertical = 3.dp)
-                            ) {
-                                Text(
-                                    text = "Chip SIM verificado",
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color(0xFF008069)
-                                )
-                            }
+
+                        Box(
+                            modifier = Modifier
+                                .clip(CircleShape)
+                                .background(if (engineState.isWifiDirectActive) WhatsAppGreenAccent.copy(alpha = 0.2f) else Color.Red.copy(alpha = 0.1f))
+                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                        ) {
+                            Text(
+                                text = if (engineState.isWifiDirectActive) "ACTIVO" else "DESCONECTADO",
+                                color = if (engineState.isWifiDirectActive) WhatsAppTeal else Color.Red,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 11.sp
+                            )
                         }
                     }
-                }
-            }
-        }
 
-        // Card 3: Dispositivos WiFi Direct Encontrados
-        item {
-            Card(
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.CellTower,
-                            contentDescription = null,
-                            tint = WhatsAppTeal,
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = "Dispositivos WiFi Direct Cercanos (${engineState.discoveredP2pDevices.size})",
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                    }
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(text = "SSID: ${engineState.ssid.ifEmpty { "Generando..." }}", fontSize = 13.sp)
+                    Text(text = "IP Local: ${engineState.localIpAddress.ifEmpty { "192.168.49.1" }}", fontSize = 13.sp)
+                    Text(text = "Rol: ${if (engineState.isGroupOwner) "Dueño de Grupo (GO)" else "Cliente Mesh"}", fontSize = 13.sp)
+                    Text(
+                        text = "Pares Directos: ${engineState.connectedPeersCount}",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = WhatsAppTeal
+                    )
 
                     Spacer(modifier = Modifier.height(8.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(text = "Enviados: ${engineState.packetsSent}", fontSize = 11.sp, color = Color.Gray)
+                        Text(text = "Recibidos: ${engineState.packetsReceived}", fontSize = 11.sp, color = Color.Gray)
+                        Text(text = "Retransmitidos: ${engineState.packetsRelayed}", fontSize = 11.sp, color = Color.Gray)
+                    }
 
-                    if (engineState.discoveredP2pDevices.isEmpty()) {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
                         Text(
-                            text = "Buscando dispositivos en el alcance de radio WiFi Direct... Asegúrate de tener el WiFi y la Ubicación activos en ambos teléfonos.",
-                            fontSize = 12.sp,
-                            color = Color.Gray,
-                            lineHeight = 16.sp
+                            text = engineState.autoConnectStatus,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = WhatsAppTeal,
+                            modifier = Modifier.weight(1f)
                         )
-                    } else {
-                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            for (dev in engineState.discoveredP2pDevices) {
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
-                                        .padding(10.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(
-                                            text = dev.deviceName ?: "Dispositivo P2P",
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 13.sp
-                                        )
-                                        Text(
-                                            text = dev.deviceAddress,
-                                            fontSize = 11.sp,
-                                            color = Color.Gray,
-                                            fontFamily = FontFamily.Monospace
-                                        )
-                                    }
-                                    Button(
-                                        onClick = { onConnectPeer(dev) },
-                                        shape = RoundedCornerShape(8.dp),
-                                        colors = ButtonDefaults.buttonColors(containerColor = WhatsAppTeal)
-                                    ) {
-                                        Icon(imageVector = Icons.Default.Link, contentDescription = null, modifier = Modifier.size(14.dp))
-                                        Spacer(modifier = Modifier.width(4.dp))
-                                        Text("Conectar", fontSize = 11.sp)
-                                    }
-                                }
-                            }
+                        Button(
+                            onClick = onScanPeers,
+                            colors = ButtonDefaults.buttonColors(containerColor = WhatsAppTeal),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                            modifier = Modifier.testTag("scan_mesh_button")
+                        ) {
+                            Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Escanear", fontSize = 12.sp)
                         }
                     }
                 }
             }
+
+            Spacer(modifier = Modifier.height(20.dp))
+            Text(
+                text = "Dispositivos WiFi Direct Detectados",
+                fontWeight = FontWeight.Bold,
+                fontSize = 16.sp
+            )
+            Spacer(modifier = Modifier.height(8.dp))
         }
 
-        // Card 4: GitHub Actions & Releases APK
-        item {
-            Card(
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { onGitHubClick() }
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp),
-                    verticalAlignment = Alignment.CenterVertically
+        if (engineState.discoveredP2pDevices.isEmpty()) {
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
                 ) {
                     Box(
                         modifier = Modifier
-                            .size(44.dp)
-                            .clip(CircleShape)
-                            .background(WhatsAppTeal),
+                            .fillMaxWidth()
+                            .padding(24.dp),
                         contentAlignment = Alignment.Center
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.RocketLaunch,
-                            contentDescription = null,
-                            tint = Color.White,
-                            modifier = Modifier.size(24.dp)
-                        )
-                    }
-                    Spacer(modifier = Modifier.width(14.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                text = "GitHub Actions & APK",
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(6.dp))
-                                    .background(WhatsAppGreenAccent.copy(alpha = 0.25f))
-                                    .padding(horizontal = 6.dp, vertical = 2.dp)
-                            ) {
-                                Text(
-                                    text = "ACTIVO",
-                                    fontSize = 9.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = WhatsAppTeal
-                                )
-                            }
-                        }
-                        Spacer(modifier = Modifier.height(2.dp))
                         Text(
-                            text = "Auto-compilación y Release en cada push a main",
-                            fontSize = 12.sp,
-                            color = Color.Gray
-                        )
-                    }
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.ArrowForwardIos,
-                        contentDescription = "Ver detalles",
-                        tint = Color.Gray,
-                        modifier = Modifier.size(16.dp)
-                    )
-                }
-            }
-        }
-
-        // Section: Nodos Conectados en la Malla
-        item {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text(
-                    text = "Nodos Activos en la Malla (${meshNodes.size})",
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-                Text(
-                    text = "${engineState.connectedPeersCount} activos",
-                    fontSize = 12.sp,
-                    color = Color(0xFF008069),
-                    fontWeight = FontWeight.Bold
-                )
-            }
-        }
-
-        if (meshNodes.isEmpty()) {
-            item {
-                Card(
-                    shape = RoundedCornerShape(12.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(20.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.WifiTethering,
-                            contentDescription = null,
-                            tint = Color.Gray,
-                            modifier = Modifier.size(36.dp)
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = "No hay nodos conectados aún",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 14.sp
-                        )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = "Cuando otro dispositivo con ChatMesh se una a la red WiFi Direct (${engineState.ssid}), aparecerá aquí automáticamente.",
-                            fontSize = 12.sp,
-                            color = Color.Gray,
-                            lineHeight = 16.sp,
-                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                            text = "Buscando teléfonos con ChatMesh cerca...",
+                            fontSize = 13.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 }
             }
         } else {
-            items(meshNodes, key = { it.nodeId }) { node ->
+            items(engineState.discoveredP2pDevices, key = { it.deviceAddress }) { dev ->
                 Card(
-                    shape = RoundedCornerShape(12.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
                 ) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(14.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                            .padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Box(
-                            modifier = Modifier
-                                .size(42.dp)
-                                .clip(CircleShape)
-                                .background(WhatsAppTeal.copy(alpha = 0.15f)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Hub,
-                                contentDescription = null,
-                                tint = WhatsAppTeal,
-                                modifier = Modifier.size(22.dp)
-                            )
-                        }
-
-                        Spacer(modifier = Modifier.width(12.dp))
-
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = node.nickname.ifEmpty { node.ssid },
-                                fontWeight = FontWeight.Bold,
+                                text = dev.deviceName ?: "Dispositivo P2P",
+                                fontWeight = FontWeight.SemiBold,
                                 fontSize = 14.sp
                             )
                             Text(
-                                text = "${node.phoneNumber} • ${node.connectionType}",
-                                fontSize = 12.sp,
-                                color = Color.Gray
-                            )
-                            Text(
-                                text = "IP: ${node.ipAddress}:${node.port} • Salto ${node.hopDistance}",
+                                text = "MAC: ${dev.deviceAddress}",
                                 fontSize = 11.sp,
-                                color = WhatsAppTeal,
-                                fontFamily = FontFamily.Monospace
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            val statusText = when (dev.status) {
+                                WifiP2pDevice.CONNECTED -> "Conectado"
+                                WifiP2pDevice.INVITED -> "Invitado"
+                                WifiP2pDevice.FAILED -> "Falló"
+                                WifiP2pDevice.AVAILABLE -> "Disponible"
+                                WifiP2pDevice.UNAVAILABLE -> "No disponible"
+                                else -> "Desconocido"
+                            }
+                            Text(
+                                text = "Estado: $statusText",
+                                fontSize = 11.sp,
+                                color = if (dev.status == WifiP2pDevice.CONNECTED) WhatsAppGreenAccent else MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
 
                         Button(
-                            onClick = {
-                                onNodeChatClick(
-                                    ContactEntity(
-                                        phoneNumber = node.phoneNumber,
-                                        displayName = node.nickname,
-                                        isRegisteredInMesh = true,
-                                        isConnected = true
-                                    )
-                                )
-                            },
-                            shape = RoundedCornerShape(8.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = WhatsAppTeal)
+                            onClick = { onConnectDevice(dev) },
+                            colors = ButtonDefaults.buttonColors(containerColor = WhatsAppTeal),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                            enabled = dev.status != WifiP2pDevice.CONNECTED
                         ) {
-                            Icon(imageVector = Icons.Default.Chat, contentDescription = null, modifier = Modifier.size(14.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Chat", fontSize = 12.sp)
+                            Text(if (dev.status == WifiP2pDevice.CONNECTED) "Conectado" else "Conectar", fontSize = 12.sp)
                         }
                     }
                 }

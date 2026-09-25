@@ -5,13 +5,13 @@ import org.json.JSONObject
 import java.util.UUID
 
 data class MeshPacket(
-    val packetType: String, // "HANDSHAKE", "CHAT_MESSAGE", "ACK", "ROUTING_ANNOUNCE", "STATUS_UPDATE", "CALL_SIGNAL"
+    val packetType: String, // "CHAT_MESSAGE", "CHAT_CHUNK", "ACK", "STATUS_UPDATE", "HEARTBEAT", "CALL_SIGNAL", "BEACON", "HANDSHAKE"
     val packetUuid: String = UUID.randomUUID().toString(),
     val sourceNodeId: String,
     val sourcePhone: String,
-    val sourceName: String,
-    val sourceSsid: String,
-    val destinationPhone: String, // or "BROADCAST"
+    val sourceName: String = "Nodo",
+    val sourceSsid: String = "",
+    val destinationPhone: String,
     val content: String = "",
     val mediaType: String = "TEXT", // "TEXT", "IMAGE", "AUDIO", "FILE"
     val mediaData: String? = null,
@@ -20,14 +20,14 @@ data class MeshPacket(
     val maxHops: Int = 8,
     val visitedNodeIds: List<String> = emptyList(),
     val timestamp: Long = System.currentTimeMillis(),
-    val statusType: String? = null, // "TYPING", "RECORDING", "ONLINE", "IDLE"
+    val statusType: String? = null, // "TYPING", "RECORDING", "ONLINE", "DELIVERED", "READ"
     val callSignalType: String? = null, // "OFFER", "ANSWER", "HANGUP", "REJECT"
     val callIsVideo: Boolean = false,
     val chunkIndex: Int = 0,
     val totalChunks: Int = 1,
     val nodeLoad: Int = 0,
     val signalDbm: Int = 0,
-    val priority: Int = 1 // 0 = URGENT (ACK/CALL), 1 = NORMAL (CHAT/STATUS), 2 = BULK (IMAGE_CHUNK)
+    val priority: Int = 1
 ) {
     fun toJson(): String {
         val obj = JSONObject()
@@ -95,7 +95,7 @@ data class MeshPacket(
                     signalDbm = obj.optInt("signalDbm", 0),
                     priority = obj.optInt("priority", 1)
                 )
-            } catch (_: Exception) {
+            } catch (e: Exception) {
                 null
             }
         }
