@@ -1,80 +1,67 @@
-name: Android Build & Release
+name: Android CI / Build & Auto-Repair
 
 on:
   push:
-    branches:
-      - main
+    branches: [ "**" ]
+  pull_request:
+    branches: [ "**" ]
   workflow_dispatch:
 
-permissions:
-  contents: write
-
 jobs:
-  build-and-release:
-    name: Build and Release APK
+  build:
+    name: Build & Test Android APK
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: 📥 Checkout del repositorio
+        uses: actions/checkout@v4
+
+      - name: ☕ Configurar JDK 17
+        uses: actions/setup-java@v4
         with:
-          fetch-depth: 0
+          distribution: 'temurin'
+          java-version: '17'
 
-      - name: Set up JDK 17
-        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
-        with:
-          distribution: temurin
-          java-version: "17"
-          cache: gradle
-
-      - name: Accept Android SDK licenses
-        shell: bash
+      - name: ⚙️ Auto-reparar y actualizar Gradle si falta en el ZIP exportado
         run: |
-          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses || true
-          if [ -x "$ANDROID_HOME/tools/bin/sdkmanager" ]; then
-            yes | "$ANDROID_HOME/tools/bin/sdkmanager" --licenses || true
-          fi
-
-      - name: Prepare environment and signing keystore
-        shell: bash
-        run: |
-          set -e
-
-          if [ ! -f .env ]; then
-            if [ -f .env.example ]; then
-              cp .env.example .env
-            else
-              touch .env
+          echo "Verificando integridad de Gradle y Gradle Wrapper..."
+          
+          # 1. Si gradlew o gradle-wrapper.properties o el jar no existen o están incompletos:
+          if [ ! -f "gradlew" ] || [ ! -f "gradle/wrapper/gradle-wrapper.properties" ] || [ ! -f "gradle/wrapper/gradle-wrapper.jar" ]; then
+            echo "⚠️ Se detectaron archivos de Gradle faltantes o incompletos (común al descargar como ZIP)."
+            echo "🔧 Generando y restaurando Gradle Wrapper automáticamente..."
+            
+            # Instalar Gradle en el runner de GitHub Actions si no está presente
+            if ! command -v gradle &> /dev/null; then
+              sudo apt-get update -qq
+              sudo apt-get install -y -qq gradle
             fi
+            
+            mkdir -p gradle/wrapper
+            gradle wrapper --gradle-version 8.11.1 --distribution-type bin || true
           fi
 
-          if [ -n "${{ secrets.KEYSTORE_BASE64 }}" ]; then
-            echo "Decoding KEYSTORE_BASE64..."
-            echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode \
-              > "$GITHUB_WORKSPACE/my-upload-key.jks"
-
-          elif [ -n "${{ secrets.SIGNING_KEY }}" ]; then
-            echo "Decoding SIGNING_KEY..."
-            echo "${{ secrets.SIGNING_KEY }}" | base64 --decode \
-              > "$GITHUB_WORKSPACE/my-upload-key.jks"
-
-          else
-            echo "Generating temporary release keystore..."
-            keytool -genkeypair -v \
-              -keystore "$GITHUB_WORKSPACE/my-upload-key.jks" \
-              -storepass "${{ secrets.STORE_PASSWORD || 'android' }}" \
-              -keypass "${{ secrets.KEY_PASSWORD || 'android' }}" \
-              -alias "${{ secrets.KEY_ALIAS || 'upload' }}" \
-              -keyalg RSA \
-              -keysize 2048 \
-              -validity 10000 \
-              -dname "CN=ChatMesh,O=P2P,C=US"
+          # 2. Asegurar configuración adecuada de gradle-wrapper.properties
+          if [ ! -f "gradle/wrapper/gradle-wrapper.properties" ]; then
+            mkdir -p gradle/wrapper
+            cat << 'EOF' > gradle/wrapper/gradle-wrapper.properties
+          distributionBase=GRADLE_USER_HOME
+          distributionPath=wrapper/dists
+          distributionUrl=https\://services.gradle.org/distributions/gradle-8.11.1-bin.zip
+          networkTimeout=10000
+          validateDistributionUrl=true
+          zipStoreBase=GRADLE_USER_HOME
+          zipStorePath=wrapper/dists
+          EOF
           fi
 
-          chmod +x ./gradlew
+          # 3. Asegurar permisos de ejecución en gradlew
+          if [ -f "gradlew" ]; then
+            chmod +x gradlew
+            echo "✅ Permisos de ejecución otorgados a gradlew."
+          fi
 
-      - name: Check for duplicate resources
-        shell: bash
+      - name: 🔍 Verificando recursos duplicados en XML...
         run: |
           echo "🔍 Verificando recursos duplicados en XML..."
           DUPLICATES=$(grep -R "<style name=" app/src/main/res/values/*.xml \
@@ -88,62 +75,22 @@ jobs:
             echo "✅ No se encontraron duplicados."
           fi
 
-      - name: Build release APK
-        env:
-          KEYSTORE_PATH: ${{ github.workspace }}/my-upload-key.jks
-          STORE_PASSWORD: ${{ secrets.STORE_PASSWORD || 'android' }}
-          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD || 'android' }}
-          KEY_ALIAS: ${{ secrets.KEY_ALIAS || 'upload' }}
+      - name: 🚀 Configurar Gradle con Cache
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: false
+
+      - name: 🔨 Compilar APK Debug
         run: |
-          ./gradlew clean assembleRelease --stacktrace
-
-      - name: Prepare APK files
-        shell: bash
-        run: |
-          set -e
-
-          mkdir -p release-output
-
-          APK_PATH="$(find app/build/outputs/apk/release \
-            -type f \
-            -name '*.apk' \
-            | head -n 1)"
-
-          if [ -z "$APK_PATH" ]; then
-            echo "Error: No se encontró ninguna APK."
-            exit 1
+          if [ -f "./gradlew" ]; then
+            ./gradlew assembleDebug --stacktrace
+          else
+            gradle assembleDebug --stacktrace
           fi
 
-          echo "APK encontrada: $APK_PATH"
-
-          cp "$APK_PATH" release-output/ChatMesh-release.apk
-          cp "$APK_PATH" \
-            "release-output/ChatMesh-v1.0.${{ github.run_number }}.apk"
-
-          sha256sum release-output/*.apk > release-output/SHA256SUMS.txt
-
-          echo "Archivos generados:"
-          ls -lh release-output/
-
-      - name: Upload APK artifact
-        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4.6.0
+      - name: 📦 Subir APK como artefacto
+        uses: actions/upload-artifact@v4
         with:
-          name: ChatMesh-APK-Release-${{ github.run_number }}
-          path: release-output/
-          if-no-files-found: error
-          retention-days: 30
-
-      - name: Publish APK as GitHub Release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG_NAME: v1.0.${{ github.run_number }}
-        shell: bash
-        run: |
-          gh release create "$TAG_NAME" \
-            release-output/ChatMesh-release.apk \
-            "release-output/ChatMesh-v1.0.${{ github.run_number }}.apk" \
-            release-output/SHA256SUMS.txt \
-            --repo "${{ github.repository }}" \
-            --title "ChatMesh $TAG_NAME" \
-            --generate-notes \
-            --notes "APK de ChatMesh generada desde el commit ${{ github.sha }}."
+          name: chatmesh-debug-apk
+          path: app/build/outputs/apk/debug/*.apk
+          retention-days: 7
