@@ -22,8 +22,9 @@ jobs:
           distribution: 'temurin'
           java-version: '21'
 
-      - name: 📱 Configurar Android SDK
-        uses: android-actions/setup-android@v3
+      - name: 📋 Aceptar licencias de Android SDK
+        run: |
+          yes | sdkmanager --licenses || true
 
       - name: ⚙️ Auto-reparar y actualizar Gradle si falta en el ZIP exportado
         run: |
@@ -70,7 +71,12 @@ jobs:
 
       - name: 🔨 Compilar APK Debug
         run: |
-          gradle assembleDebug --no-daemon --stacktrace
+          if [ -f "./gradlew" ]; then
+            chmod +x ./gradlew
+            ./gradlew assembleDebug --no-daemon --stacktrace
+          else
+            gradle assembleDebug --no-daemon --stacktrace
+          fi
 
       - name: 📦 Subir APK como artefacto
         uses: actions/upload-artifact@v4
