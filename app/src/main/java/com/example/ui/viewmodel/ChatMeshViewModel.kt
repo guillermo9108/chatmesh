@@ -178,6 +178,40 @@ class ChatMeshViewModel(application: Application) : AndroidViewModel(application
         meshEngine.endCall()
     }
 
+    fun declineCallWithMessage(reason: String) {
+        val contact = engineState.value.activeCallPeer
+        if (contact != null && reason.isNotBlank()) {
+            meshEngine.sendChatMessage(
+                recipientPhone = contact.phoneNumber,
+                content = reason,
+                mediaType = "TEXT"
+            )
+        }
+        meshEngine.endCall()
+    }
+
+    fun handleIncomingCallIntent(callerPhone: String, isVideo: Boolean = false) {
+        viewModelScope.launch {
+            val contact = repository.getContact(callerPhone) ?: ContactEntity(
+                phoneNumber = callerPhone,
+                displayName = callerPhone,
+                isRegisteredInMesh = true,
+                isConnected = true
+            )
+            meshEngine.handleCallSignal(
+                com.example.mesh.MeshPacket(
+                    packetType = "CALL_SIGNAL",
+                    sourceNodeId = callerPhone,
+                    sourcePhone = callerPhone,
+                    sourceName = contact.displayName,
+                    destinationPhone = engineState.value.myPhoneNumber,
+                    callSignalType = "OFFER",
+                    callIsVideo = isVideo
+                )
+            )
+        }
+    }
+
     fun toggleMute() {
         meshEngine.toggleMute()
     }

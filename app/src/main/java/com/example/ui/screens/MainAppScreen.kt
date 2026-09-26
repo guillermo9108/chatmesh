@@ -72,7 +72,7 @@ fun MainAppScreen(
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
     ) {
-        // Priority 1: Full-screen Call Screen if a call is active (incoming, connecting, or ongoing)
+        // Priority 1: Full-screen Call Management UI if a call is active (incoming, connecting, or ongoing)
         if (engineState.isCallActive && engineState.activeCallPeer != null) {
             CallScreen(
                 contact = engineState.activeCallPeer!!,
@@ -80,7 +80,8 @@ fun MainAppScreen(
                 onAnswerCall = { viewModel.answerCall() },
                 onEndCall = { viewModel.endCall() },
                 onToggleMute = { viewModel.toggleMute() },
-                onToggleSpeaker = { viewModel.toggleSpeaker() }
+                onToggleSpeaker = { viewModel.toggleSpeaker() },
+                onDeclineWithMessage = { reason -> viewModel.declineCallWithMessage(reason) }
             )
         }
         // Priority 2: Chat Detail Screen if a contact is selected

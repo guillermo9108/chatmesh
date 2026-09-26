@@ -37,10 +37,18 @@ class MainActivity : ComponentActivity() {
 
     private fun handleIntent(intent: Intent?) {
         if (intent == null) return
-        if (intent.getBooleanExtra("EXTRA_ACTION_ANSWER", false)) {
+        val callerPhone = intent.getStringExtra("EXTRA_CONTACT_PHONE")
+        val isIncomingCall = intent.getBooleanExtra("EXTRA_INCOMING_CALL", false)
+        val isVideo = intent.getBooleanExtra("EXTRA_IS_VIDEO", false)
+        val isAnswer = intent.getBooleanExtra("EXTRA_ACTION_ANSWER", false)
+        val isReject = intent.getBooleanExtra("EXTRA_ACTION_REJECT", false)
+
+        if (isAnswer) {
             viewModel.answerCall()
-        } else if (intent.getBooleanExtra("EXTRA_ACTION_REJECT", false)) {
+        } else if (isReject) {
             viewModel.endCall()
+        } else if (isIncomingCall && !callerPhone.isNullOrBlank()) {
+            viewModel.handleIncomingCallIntent(callerPhone, isVideo)
         }
     }
 }
