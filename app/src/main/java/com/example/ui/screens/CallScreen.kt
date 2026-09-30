@@ -1,5 +1,9 @@
 package com.example.ui.screens
 
+import android.graphics.Bitmap
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.foundation.Image
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -23,6 +27,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.entity.ContactEntity
 import com.example.mesh.MeshEngineState
+import com.example.ui.components.UserAvatar
 import com.example.ui.theme.WhatsAppGreenAccent
 import com.example.ui.theme.WhatsAppTeal
 
@@ -31,10 +36,13 @@ import com.example.ui.theme.WhatsAppTeal
 fun CallScreen(
     contact: ContactEntity,
     engineState: MeshEngineState,
+    localVideoBitmap: Bitmap? = null,
+    remoteVideoBitmap: Bitmap? = null,
     onAnswerCall: () -> Unit,
     onEndCall: () -> Unit,
     onToggleMute: () -> Unit,
     onToggleSpeaker: () -> Unit,
+    onSwitchCamera: (() -> Unit)? = null,
     onDeclineWithMessage: ((String) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
@@ -77,6 +85,62 @@ fun CallScreen(
             .navigationBarsPadding()
             .testTag("dedicated_call_management_ui")
     ) {
+        // If Video Call and remote video is available, render it in the background
+        if (engineState.isVideoCall && engineState.isCallConnected && remoteVideoBitmap != null) {
+            Image(
+                bitmap = remoteVideoBitmap.asImageBitmap(),
+                contentDescription = "Video Remoto",
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop
+            )
+            // Subtle dark overlay to keep controls readable
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.25f))
+            )
+        }
+
+        // Floating Local Video Preview (Picture-in-Picture)
+        if (engineState.isVideoCall && localVideoBitmap != null) {
+            Surface(
+                shape = RoundedCornerShape(16.dp),
+                color = Color.Black,
+                border = androidx.compose.foundation.BorderStroke(2.dp, Color.White.copy(alpha = 0.6f)),
+                shadowElevation = 8.dp,
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(top = 70.dp, end = 20.dp)
+                    .size(width = 100.dp, height = 135.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .clickable { onSwitchCamera?.invoke() }
+                    .testTag("local_video_preview")
+            ) {
+                Box {
+                    Image(
+                        bitmap = localVideoBitmap.asImageBitmap(),
+                        contentDescription = "Vista Previa Local",
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop
+                    )
+                    IconButton(
+                        onClick = { onSwitchCamera?.invoke() },
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .size(32.dp)
+                            .padding(4.dp)
+                            .background(Color.Black.copy(alpha = 0.5f), CircleShape)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.FlipCameraAndroid,
+                            contentDescription = "Cambiar cámara",
+                            tint = Color.White,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                }
+            }
+        }
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -182,16 +246,16 @@ fun CallScreen(
                 Box(
                     modifier = Modifier
                         .size(130.dp)
-                        .clip(CircleShape)
-                        .background(WhatsAppTeal)
-                        .border(3.dp, Color.White.copy(alpha = 0.3f), CircleShape),
+                        .clip(CircleShape),
                     contentAlignment = Alignment.Center
                 ) {
-                    Icon(
-                        imageVector = if (engineState.isVideoCall) Icons.Default.Videocam else Icons.Default.Person,
-                        contentDescription = "Avatar",
-                        tint = Color.White,
-                        modifier = Modifier.size(68.dp)
+                    UserAvatar(
+                        avatarUri = contact.avatarUri,
+                        displayName = contact.displayName.ifBlank { contact.phoneNumber },
+                        size = 130.dp,
+                        iconSize = 68.dp,
+                        fontSize = 52.sp,
+                        border = androidx.compose.foundation.BorderStroke(3.dp, Color.White.copy(alpha = 0.4f))
                     )
                 }
             }
@@ -387,6 +451,33 @@ fun CallScreen(
                                 color = Color.White.copy(alpha = 0.8f),
                                 fontSize = 12.sp
                             )
+                        }
+
+                        // Switch camera button for video calls
+                        if (engineState.isVideoCall && onSwitchCamera != null) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                IconButton(
+                                    onClick = onSwitchCamera,
+                                    modifier = Modifier
+                                        .size(60.dp)
+                                        .clip(CircleShape)
+                                        .background(Color.White.copy(alpha = 0.18f))
+                                        .testTag("switch_camera_button")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.FlipCameraAndroid,
+                                        contentDescription = "Cambiar cámara",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(30.dp)
+                                    )
+                                }
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Text(
+                                    text = "Cámara",
+                                    color = Color.White.copy(alpha = 0.8f),
+                                    fontSize = 12.sp
+                                )
+                            }
                         }
                     }
                 }

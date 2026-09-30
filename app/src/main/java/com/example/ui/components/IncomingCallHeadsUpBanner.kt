@@ -62,20 +62,11 @@ fun IncomingCallHeadsUpBanner(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 // Avatar
-                Box(
-                    modifier = Modifier
-                        .size(46.dp)
-                        .clip(CircleShape)
-                        .background(WhatsAppTeal),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = if (engineState.isVideoCall) Icons.Default.Videocam else Icons.Default.Person,
-                        contentDescription = null,
-                        tint = Color.White,
-                        modifier = Modifier.size(24.dp)
-                    )
-                }
+                UserAvatar(
+                    avatarUri = contact.avatarUri,
+                    displayName = contact.displayName.ifBlank { contact.phoneNumber },
+                    size = 46.dp
+                )
 
                 Spacer(modifier = Modifier.width(12.dp))
 

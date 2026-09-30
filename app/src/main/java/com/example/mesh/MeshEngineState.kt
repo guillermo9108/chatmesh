@@ -14,6 +14,8 @@ data class MeshEngineState(
     val connectedPeersCount: Int = 0,
     val myNodeId: String = "",
     val myPhoneNumber: String = "",
+    val myNickname: String = "Usuario",
+    val myAvatarUri: String? = null,
     val packetsSent: Long = 0L,
     val packetsReceived: Long = 0L,
     val packetsRelayed: Long = 0L,

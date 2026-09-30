@@ -70,12 +70,13 @@ class ChatMeshViewModel(application: Application) : AndroidViewModel(application
                 val newProfile = UserProfile(
                     phoneNumber = if (phone.isNotEmpty()) phone else "+5300000000",
                     nickname = "Usuario",
+                    avatarUri = null,
                     ssid = SimDetectionUtil.generateSsid(phone)
                 )
                 repository.saveUserProfile(newProfile)
-                meshEngine.initialize(newProfile.phoneNumber, newProfile.nickname)
+                meshEngine.initialize(newProfile.phoneNumber, newProfile.nickname, newProfile.avatarUri)
             } else {
-                meshEngine.initialize(existing.phoneNumber, existing.nickname)
+                meshEngine.initialize(existing.phoneNumber, existing.nickname, existing.avatarUri)
             }
             refreshContacts()
         }
@@ -142,14 +143,22 @@ class ChatMeshViewModel(application: Application) : AndroidViewModel(application
         )
     }
 
-    fun sendAudioVoiceMessage(durationSeconds: Int) {
+    fun sendAudioVoiceMessage(base64Audio: String, durationSeconds: Int) {
         val contact = _selectedContact.value ?: return
         meshEngine.sendChatMessage(
             recipientPhone = contact.phoneNumber,
             content = "Mensaje de voz",
             mediaType = "AUDIO",
+            mediaData = base64Audio,
             audioDuration = durationSeconds
         )
+    }
+
+    val localVideoBitmap = meshEngine.videoCallManager.localVideoBitmap
+    val remoteVideoBitmap = meshEngine.videoCallManager.remoteVideoBitmap
+
+    fun switchCamera() {
+        meshEngine.switchCamera()
     }
 
     fun sendFileMessage(fileName: String, fileUri: String) {
@@ -237,19 +246,27 @@ class ChatMeshViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
-    fun updateProfile(nickname: String, phoneNumber: String) {
+    fun updateProfile(nickname: String, phoneNumber: String, avatarUri: String?) {
         val cleanPhone = SimDetectionUtil.sanitizePhoneNumber(phoneNumber)
         viewModelScope.launch {
             val current = repository.getUserProfile()
-            if (current != null) {
-                repository.saveUserProfile(
-                    current.copy(
-                        nickname = nickname,
-                        phoneNumber = cleanPhone,
-                        ssid = SimDetectionUtil.generateSsid(cleanPhone)
-                    )
+            val updated = if (current != null) {
+                current.copy(
+                    nickname = nickname,
+                    phoneNumber = cleanPhone,
+                    avatarUri = avatarUri,
+                    ssid = SimDetectionUtil.generateSsid(cleanPhone)
+                )
+            } else {
+                UserProfile(
+                    phoneNumber = cleanPhone,
+                    nickname = nickname,
+                    avatarUri = avatarUri,
+                    ssid = SimDetectionUtil.generateSsid(cleanPhone)
                 )
             }
+            repository.saveUserProfile(updated)
+            meshEngine.updateUserProfile(cleanPhone, nickname, avatarUri)
         }
     }
 
@@ -298,8 +315,8 @@ class ChatMeshViewModel(application: Application) : AndroidViewModel(application
         meshEngine.reCreateP2pGroup()
     }
 
-    fun sendAudioMessage(durationSeconds: Int) {
-        sendAudioVoiceMessage(durationSeconds)
+    fun sendAudioMessage(base64Audio: String, durationSeconds: Int) {
+        sendAudioVoiceMessage(base64Audio, durationSeconds)
     }
 
     fun sendUserStatus(status: String) {

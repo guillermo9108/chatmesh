@@ -22,6 +22,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.example.data.entity.ContactEntity
+import com.example.ui.components.UserAvatar
 import com.example.ui.theme.WhatsAppGreenAccent
 import com.example.ui.theme.WhatsAppGreenLight
 import com.example.ui.theme.WhatsAppTeal
@@ -95,28 +96,11 @@ fun ChatItemRow(
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Box(
-            modifier = Modifier
-                .size(48.dp)
-                .clip(CircleShape)
-                .background(WhatsAppTeal.copy(alpha = 0.2f)),
-            contentAlignment = Alignment.Center
-        ) {
-            if (!contact.avatarUri.isNullOrEmpty()) {
-                AsyncImage(
-                    model = contact.avatarUri,
-                    contentDescription = null,
-                    modifier = Modifier.fillMaxSize()
-                )
-            } else {
-                Icon(
-                    Icons.Default.Person,
-                    contentDescription = null,
-                    tint = WhatsAppTeal,
-                    modifier = Modifier.size(28.dp)
-                )
-            }
-        }
+        UserAvatar(
+            avatarUri = contact.avatarUri,
+            displayName = contact.displayName.ifBlank { contact.phoneNumber },
+            size = 48.dp
+        )
 
         Spacer(modifier = Modifier.width(16.dp))
 

@@ -28,14 +28,27 @@ import com.example.util.ImageMediaUtil
 import java.text.SimpleDateFormat
 import java.util.*
 
+import androidx.compose.ui.platform.LocalContext
+import com.example.util.VoiceMessageHelper
+
 @Composable
 fun ChatBubble(
     message: MessageEntity,
     isDarkTheme: Boolean = isSystemInDarkTheme(),
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
     val isOutgoing = message.isOutgoing
-    var isPlaying by remember { mutableStateOf(false) }
+    var isPlaying by remember { mutableStateOf(VoiceMessageHelper.isPlaying(message.messageUuid)) }
+    var playbackProgress by remember { mutableFloatStateOf(0f) }
+
+    DisposableEffect(message.messageUuid) {
+        onDispose {
+            if (VoiceMessageHelper.isPlaying(message.messageUuid)) {
+                VoiceMessageHelper.stopPlayback()
+            }
+        }
+    }
 
     val bgColor = if (isOutgoing) {
         if (isDarkTheme) BubbleSentDark else BubbleSentLight
@@ -116,21 +129,45 @@ fun ChatBubble(
                                 contentDescription = if (isPlaying) "Pausar" else "Reproducir",
                                 tint = WhatsAppTeal,
                                 modifier = Modifier
-                                    .size(36.dp)
-                                    .clickable { isPlaying = !isPlaying }
+                                    .size(38.dp)
+                                    .clickable {
+                                        if (isPlaying) {
+                                            VoiceMessageHelper.stopPlayback()
+                                            isPlaying = false
+                                            playbackProgress = 0f
+                                        } else {
+                                            val started = VoiceMessageHelper.playAudio(
+                                                context = context,
+                                                messageUuid = message.messageUuid,
+                                                base64Audio = message.mediaBase64,
+                                                localUri = message.mediaUri,
+                                                onProgress = { progress ->
+                                                    playbackProgress = progress
+                                                },
+                                                onCompletion = {
+                                                    isPlaying = false
+                                                    playbackProgress = 0f
+                                                }
+                                            )
+                                            isPlaying = started
+                                        }
+                                    }
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             Column(modifier = Modifier.weight(1f)) {
                                 Slider(
-                                    value = if (isPlaying) 0.5f else 0f,
+                                    value = if (isPlaying) playbackProgress else 0f,
                                     onValueChange = {},
                                     colors = SliderDefaults.colors(
                                         thumbColor = WhatsAppTeal,
                                         activeTrackColor = WhatsAppTeal
                                     )
                                 )
+                                val currentSec = if (isPlaying) {
+                                    (playbackProgress * (message.audioDurationSeconds.coerceAtLeast(1))).toInt()
+                                } else 0
                                 Text(
-                                    text = "${message.audioDurationSeconds}s",
+                                    text = if (isPlaying) "${currentSec}s / ${message.audioDurationSeconds}s" else "${message.audioDurationSeconds}s",
                                     fontSize = 11.sp,
                                     color = timeColor
                                 )

@@ -83,7 +83,7 @@ jobs:
 
       - name: 🏷️ Preparar archivo APK
         run: |
-          # Copiar el archivo APK generado con un nombre limpio y reconocible
+          mkdir -p app/build/outputs/apk/debug/
           if [ -f "app/build/outputs/apk/debug/app-debug.apk" ]; then
             cp app/build/outputs/apk/debug/app-debug.apk app/build/outputs/apk/debug/ChatMesh.apk
             echo "✅ APK preparado exitosamente como ChatMesh.apk"
@@ -91,30 +91,30 @@ jobs:
             echo "⚠️ Buscando APK alternativo..."
             find app/build/outputs/apk/ -name "*.apk" -exec cp {} app/build/outputs/apk/debug/ChatMesh.apk \;
           fi
+          echo "Contenido de app/build/outputs/apk/:"
+          find app/build/outputs/apk/ -name "*.apk" -ls
 
       - name: 📦 Subir APK a Artifacts de GitHub
         uses: actions/upload-artifact@v4
         with:
           name: ChatMesh-APK
-          path: app/build/outputs/apk/debug/ChatMesh.apk
+          path: app/build/outputs/apk/**/*.apk
           retention-days: 14
 
       - name: 🚀 Publicar APK en Releases para descarga directa en 1 clic
-        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/')
+        if: github.event_name != 'pull_request'
         uses: softprops/action-gh-release@v2
         continue-on-error: true
         with:
-          tag_name: latest
-          name: "ChatMesh - Última Versión Disponible"
+          tag_name: "v1.0-${{ github.run_number }}"
+          name: "ChatMesh - APK Build #${{ github.run_number }}"
           body: |
-            ### 📱 ChatMesh APK para Android
-            - Descarga directa del instalador APK para tu teléfono.
-            - No requiere internet: comunicación y llamadas por WiFi Direct P2P y Wi-Fi Aware.
-            
-            **Instalación:**
-            1. Descarga el archivo `ChatMesh.apk` que aparece abajo en **Assets**.
-            2. Ábrelo en tu dispositivo Android y pulsa **Instalar**.
-          files: app/build/outputs/apk/debug/ChatMesh.apk
+            ### 📱 ChatMesh APK para Android (Listo para Instalar)
+            - **Descarga directa:** Pulsa sobre `ChatMesh.apk` abajo en la sección **Assets**.
+            - **Sin Internet:** Diseñado para funcionar 100% offline mediante WiFi Direct P2P y Wi-Fi Aware.
+            - **Audio y Video:** Llamadas de voz, videollamadas en tiempo real y notas de voz integradas.
+          files: |
+            app/build/outputs/apk/**/*.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

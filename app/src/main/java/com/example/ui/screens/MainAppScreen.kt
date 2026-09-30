@@ -33,6 +33,8 @@ fun MainAppScreen(
     val selectedContact by viewModel.selectedContact.collectAsStateWithLifecycle()
     val activeMessages by viewModel.activeMessages.collectAsStateWithLifecycle()
     val searchQuery by viewModel.searchQuery.collectAsStateWithLifecycle()
+    val localVideoBitmap by viewModel.localVideoBitmap.collectAsStateWithLifecycle()
+    val remoteVideoBitmap by viewModel.remoteVideoBitmap.collectAsStateWithLifecycle()
 
     var selectedTabIndex by remember { mutableIntStateOf(0) }
     var showProfileDialog by remember { mutableStateOf(false) }
@@ -77,10 +79,13 @@ fun MainAppScreen(
             CallScreen(
                 contact = engineState.activeCallPeer!!,
                 engineState = engineState,
+                localVideoBitmap = localVideoBitmap,
+                remoteVideoBitmap = remoteVideoBitmap,
                 onAnswerCall = { viewModel.answerCall() },
                 onEndCall = { viewModel.endCall() },
                 onToggleMute = { viewModel.toggleMute() },
                 onToggleSpeaker = { viewModel.toggleSpeaker() },
+                onSwitchCamera = { viewModel.switchCamera() },
                 onDeclineWithMessage = { reason -> viewModel.declineCallWithMessage(reason) }
             )
         }
@@ -96,8 +101,8 @@ fun MainAppScreen(
                 onSendImage = { uri, caption, base64 ->
                     viewModel.sendImageMessage(uri, caption, base64)
                 },
-                onSendAudio = { durationSec ->
-                    viewModel.sendAudioMessage(durationSec)
+                onSendAudio = { audioBase64, durationSec ->
+                    viewModel.sendAudioMessage(audioBase64, durationSec)
                 },
                 onSendFile = { fileName ->
                     viewModel.sendFileMessage(fileName, fileName)
@@ -120,7 +125,7 @@ fun MainAppScreen(
                 WhatsAppTopBar(
                     selectedTabIndex = selectedTabIndex,
                     onTabSelected = { selectedTabIndex = it },
-                    onSearchClick = { /* Search toggled */ },
+                    onSearchClick = { selectedTabIndex = 1 },
                     onProfileClick = { showProfileDialog = true },
                     onSyncContactsClick = { viewModel.refreshContacts() },
                     onSimConfigClick = { showSimConfigDialog = true },
@@ -140,6 +145,7 @@ fun MainAppScreen(
                         1 -> ContactsTab(
                             contacts = allContacts,
                             searchQuery = searchQuery,
+                            onSearchQueryChange = { q -> viewModel.setSearchQuery(q) },
                             onContactClick = { contact -> viewModel.selectContact(contact) },
                             onInviteContact = { contact -> viewModel.inviteContact(contact) }
                         )
@@ -168,8 +174,8 @@ fun MainAppScreen(
         if (showProfileDialog) {
             ProfileDialog(
                 userProfile = userProfile,
-                onSaveProfile = { nick, phone ->
-                    viewModel.updateProfile(nick, phone)
+                onSaveProfile = { nick, phone, avatarUri ->
+                    viewModel.updateProfile(nick, phone, avatarUri)
                     showProfileDialog = false
                 },
                 onDismiss = { showProfileDialog = false }

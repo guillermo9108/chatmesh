@@ -28,6 +28,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import com.example.ui.components.UserAvatar
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -40,6 +41,7 @@ import com.example.ui.theme.WhatsAppChatBgLight
 import com.example.ui.theme.WhatsAppGreenAccent
 import com.example.ui.theme.WhatsAppTeal
 import com.example.util.ImageMediaUtil
+import com.example.util.VoiceMessageHelper
 import kotlinx.coroutines.delay
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -52,7 +54,7 @@ fun ChatDetailScreen(
     onBackClick: () -> Unit,
     onSendMessage: (String) -> Unit,
     onSendImage: (String, String, String) -> Unit,
-    onSendAudio: (Int) -> Unit,
+    onSendAudio: (String, Int) -> Unit,
     onSendFile: (String) -> Unit,
     onAudioCallClick: () -> Unit,
     onVideoCallClick: () -> Unit,
@@ -113,6 +115,18 @@ fun ChatDetailScreen(
         }
     }
 
+    // Audio file picker
+    val audioPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            val base64 = ImageMediaUtil.uriToBase64(context, uri)
+            if (!base64.isNullOrEmpty()) {
+                onSendAudio(base64, 15)
+            }
+        }
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -121,20 +135,11 @@ fun ChatDetailScreen(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Box(
-                            modifier = Modifier
-                                .size(38.dp)
-                                .clip(CircleShape)
-                                .background(Color.White.copy(alpha = 0.2f)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                Icons.Default.Person,
-                                contentDescription = null,
-                                tint = Color.White,
-                                modifier = Modifier.size(24.dp)
-                            )
-                        }
+                        UserAvatar(
+                            avatarUri = contact.avatarUri,
+                            displayName = contact.displayName.ifBlank { contact.phoneNumber },
+                            size = 38.dp
+                        )
                         Spacer(modifier = Modifier.width(10.dp))
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
@@ -302,7 +307,10 @@ fun ChatDetailScreen(
                                         color = Color.Red,
                                         modifier = Modifier.weight(1f)
                                     )
-                                    TextButton(onClick = { isRecording = false }) {
+                                    TextButton(onClick = {
+                                        VoiceMessageHelper.cancelRecording()
+                                        isRecording = false
+                                    }) {
                                         Text("Cancelar", color = Color.Gray)
                                     }
                                 } else {
@@ -370,10 +378,16 @@ fun ChatDetailScreen(
                                     onTypingChange("STOPPED")
                                 } else if (isRecording) {
                                     val dur = recordingSeconds
+                                    val (_, base64) = VoiceMessageHelper.stopRecording()
                                     isRecording = false
-                                    onSendAudio(dur)
+                                    if (base64 != null) {
+                                        onSendAudio(base64, dur.coerceAtLeast(1))
+                                    }
                                 } else {
-                                    isRecording = true
+                                    val started = VoiceMessageHelper.startRecording(context)
+                                    if (started) {
+                                        isRecording = true
+                                    }
                                 }
                             },
                             containerColor = WhatsAppTeal,
@@ -454,7 +468,7 @@ fun ChatDetailScreen(
                                 color = Color(0xFFFF9800),
                                 onClick = {
                                     showAttachmentSheet = false
-                                    onSendAudio(5)
+                                    audioPickerLauncher.launch("audio/*")
                                 }
                             )
                         }

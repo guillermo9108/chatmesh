@@ -19,6 +19,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.entity.CallEntity
 import com.example.data.entity.ContactEntity
+import com.example.ui.components.UserAvatar
 import com.example.ui.theme.WhatsAppTeal
 import java.text.SimpleDateFormat
 import java.util.*
@@ -95,20 +96,11 @@ fun CallItemRow(
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Box(
-            modifier = Modifier
-                .size(48.dp)
-                .clip(CircleShape)
-                .background(WhatsAppTeal.copy(alpha = 0.15f)),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                Icons.Default.Person,
-                contentDescription = null,
-                tint = WhatsAppTeal,
-                modifier = Modifier.size(28.dp)
-            )
-        }
+        UserAvatar(
+            avatarUri = null,
+            displayName = call.contactName.ifBlank { call.contactPhone },
+            size = 48.dp
+        )
 
         Spacer(modifier = Modifier.width(16.dp))
 

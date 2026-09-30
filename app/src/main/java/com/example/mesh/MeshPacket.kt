@@ -11,6 +11,8 @@ data class MeshPacket(
     val sourcePhone: String,
     val sourceName: String = "Nodo",
     val sourceSsid: String = "",
+    val sourceIp: String = "",
+    val sourceAvatar: String? = null,
     val destinationPhone: String,
     val content: String = "",
     val mediaType: String = "TEXT", // "TEXT", "IMAGE", "AUDIO", "FILE"
@@ -37,6 +39,8 @@ data class MeshPacket(
         obj.put("sourcePhone", sourcePhone)
         obj.put("sourceName", sourceName)
         obj.put("sourceSsid", sourceSsid)
+        obj.put("sourceIp", sourceIp)
+        if (sourceAvatar != null) obj.put("sourceAvatar", sourceAvatar)
         obj.put("destinationPhone", destinationPhone)
         obj.put("content", content)
         obj.put("mediaType", mediaType)
@@ -77,6 +81,8 @@ data class MeshPacket(
                     sourcePhone = obj.getString("sourcePhone"),
                     sourceName = obj.optString("sourceName", "Nodo"),
                     sourceSsid = obj.optString("sourceSsid", ""),
+                    sourceIp = obj.optString("sourceIp", ""),
+                    sourceAvatar = if (obj.has("sourceAvatar")) obj.getString("sourceAvatar") else null,
                     destinationPhone = obj.getString("destinationPhone"),
                     content = obj.optString("content", ""),
                     mediaType = obj.optString("mediaType", "TEXT"),

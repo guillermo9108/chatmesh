@@ -9,17 +9,38 @@ import androidx.activity.viewModels
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
+import com.example.data.db.ChatMeshDatabase
+import com.example.data.repository.ChatMeshRepository
+import com.example.mesh.MeshEngineHolder
+import com.example.mesh.MeshForegroundService
 import com.example.ui.screens.MainAppScreen
 import com.example.ui.theme.MyApplicationTheme
 import com.example.ui.viewmodel.ChatMeshViewModel
 
 class MainActivity : ComponentActivity() {
+
     private val viewModel: ChatMeshViewModel by viewModels()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // 1. Crear el motor singleton ANTES de que el ViewModel lo use
+        val db = ChatMeshDatabase.getDatabase(applicationContext)
+        val repo = ChatMeshRepository(
+            db.userDao(),
+            db.contactDao(),
+            db.messageDao(),
+            db.meshNodeDao(),
+            db.callDao()
+        )
+        MeshEngineHolder.init(applicationContext, repo)
+
+        // 2. Arrancar el servicio en primer plano para mantener vivo el proceso
+        MeshForegroundService.start(applicationContext)
+
         enableEdgeToEdge()
         handleIntent(intent)
+
         setContent {
             MyApplicationTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
