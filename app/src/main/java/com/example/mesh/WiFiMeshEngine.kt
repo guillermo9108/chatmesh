@@ -11,6 +11,7 @@ import android.media.AudioManager
 import android.media.AudioRecord
 import android.media.AudioTrack
 import android.media.MediaRecorder
+import android.net.wifi.WpsInfo
 import android.net.wifi.aware.*
 import android.net.wifi.p2p.*
 import android.net.wifi.p2p.nsd.WifiP2pDnsSdServiceInfo
@@ -117,7 +118,6 @@ class WiFiMeshEngine(
                 WifiP2pManager.WIFI_P2P_THIS_DEVICE_CHANGED_ACTION -> {
                     @Suppress("DEPRECATION")
                     val dev = intent.getParcelableExtra<WifiP2pDevice>(WifiP2pManager.EXTRA_WIFI_P2P_DEVICE)
-                    // No sobreescribimos myNodeId (identidad mesh); la MAC se consulta puntualmente
                     if (dev != null) {
                         Log.d(TAG, "P2P device local: ${dev.deviceAddress} - ${dev.deviceName}")
                     }
@@ -131,7 +131,6 @@ class WiFiMeshEngine(
     // ============================================================
     fun initialize(myPhone: String, myNickname: String, myAvatarUri: String? = null) {
         if (isInitialized) {
-            // Ya arrancado en este proceso: solo actualizamos perfil
             updateUserProfile(myPhone, myNickname, myAvatarUri)
             return
         }
@@ -323,10 +322,6 @@ class WiFiMeshEngine(
         })
     }
 
-    /**
-     * Devuelve la IPv4 real de la interfaz p2p (p2p0, p2p-wlan0-0, etc.)
-     * Necesario porque requestConnectionInfo NO informa la IP local del cliente.
-     */
     private fun getP2pInterfaceAddress(): String? {
         try {
             val ifaces = NetworkInterface.getNetworkInterfaces() ?: return null
@@ -377,7 +372,6 @@ class WiFiMeshEngine(
                         localIpAddress = ownerIp
                     )
                 } else {
-                    // Cliente: nuestra IP real NO es groupOwnerAddress
                     val myLocalIp = getP2pInterfaceAddress() ?: "192.168.49.2"
                     _engineState.value = _engineState.value.copy(
                         isWifiDirectActive = true,
@@ -411,27 +405,14 @@ class WiFiMeshEngine(
     fun connectToPeer(device: WifiP2pDevice) {
         val ch = p2pChannel ?: return
 
-        val config = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            try {
-                val builder = WifiP2pConfig.Builder()
-                if (device.deviceAddress.isNotEmpty()) {
-                    builder.setDeviceAddress(android.net.MacAddress.fromString(device.deviceAddress))
-                }
-                builder.setPassphrase(MESH_GLOBAL_PASSPHRASE)
-                // 15 = preferimos ser CLIENTE, no GO (regla determinística)
-                builder.setGroupOwnerIntent(15)
-                builder.build()
-            } catch (_: Exception) {
-                WifiP2pConfig().apply {
-                    deviceAddress = device.deviceAddress
-                    groupOwnerIntent = 15
-                }
-            }
-        } else {
-            WifiP2pConfig().apply {
-                deviceAddress = device.deviceAddress
-                groupOwnerIntent = 15
-            }
+        // groupOwnerIntent solo está disponible en el constructor clásico
+        // de WifiP2pConfig, no en WifiP2pConfig.Builder (API Q+).
+        @Suppress("DEPRECATION")
+        val config = WifiP2pConfig().apply {
+            deviceAddress = device.deviceAddress
+            // 15 = preferimos ser CLIENTE, no GO (regla determinística)
+            groupOwnerIntent = 15
+            wps.setup = WpsInfo.PBC
         }
 
         if (_engineState.value.isGroupOwner && _engineState.value.connectedPeersCount == 0) {
@@ -461,15 +442,11 @@ class WiFiMeshEngine(
 
     /**
      * Auto-conexión DETERMINÍSTICA.
-     *
-     * Regla: solo el dispositivo con el número "menor" (comparado como string
-     * de dígitos) inicia connect(). El otro espera pasivamente a que el GO
-     * se forme. Esto evita colisiones WiFi Direct (reason=3 BUSY).
+     * Regla: solo el dispositivo con el número "menor" inicia connect().
+     * El otro espera pasivamente a que el GO se forme.
      */
     fun evaluateAndAutoConnectToBestNode() {
-        // Si ya soy GO, no intento conectar a nadie
         if (_engineState.value.isWifiDirectActive && _engineState.value.isGroupOwner) return
-        // Si ya tengo socket activo, no reconecto
         if (activeClientSockets.isNotEmpty()) return
 
         val devices = _engineState.value.discoveredP2pDevices
@@ -487,7 +464,6 @@ class WiFiMeshEngine(
                 .substringAfter("Mesh_", "")
                 .filter { it.isDigit() }
             if (theirPhone.isEmpty() || myPhone.isEmpty()) return@filter true
-            // Regla: solo el "menor" llama. El "mayor" espera.
             myPhone < theirPhone
         }
 
@@ -547,7 +523,7 @@ class WiFiMeshEngine(
     }
 
     // ============================================================
-    //  WiFi Aware (se mantiene igual)
+    //  WiFi Aware
     // ============================================================
     private fun setupRealWifiAware(ssid: String) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -623,7 +599,7 @@ class WiFiMeshEngine(
     }
 
     // ============================================================
-    //  TCP Server + Client con keepalive y writers cacheados
+    //  TCP Server + Client
     // ============================================================
     private fun startRealTcpMeshServer() {
         scope.launch(Dispatchers.IO) {
@@ -668,7 +644,6 @@ class WiFiMeshEngine(
         scope.launch(Dispatchers.IO) {
             val remoteIp = socket.inetAddress?.hostAddress.orEmpty()
             if (remoteIp.isNotEmpty()) {
-                // Cerrar socket previo si existía (evita duplicados)
                 activeClientSockets[remoteIp]?.let { old ->
                     if (old !== socket) {
                         try { socketWriters.remove(old)?.close() } catch (_: Exception) {}
@@ -678,7 +653,6 @@ class WiFiMeshEngine(
                 activeClientSockets[remoteIp] = socket
             }
 
-            // Handshake saliente
             try {
                 val handshake = MeshPacket(
                     packetType = "HANDSHAKE",
@@ -698,7 +672,6 @@ class WiFiMeshEngine(
                     val line = try {
                         reader.readLine()
                     } catch (e: SocketTimeoutException) {
-                        // Timeout de lectura: solo continuamos si el socket sigue vivo
                         continue
                     } ?: break
                     val packet = MeshPacket.fromJson(line)
@@ -904,14 +877,12 @@ class WiFiMeshEngine(
             val json = packet.toJson()
             val data = json.toByteArray(Charsets.UTF_8)
 
-            // 1. Envío TCP directo a todos los sockets activos (con writer cacheado)
             for ((_, socket) in activeClientSockets) {
                 try {
                     if (!socket.isClosed) writerFor(socket).println(json)
                 } catch (_: Exception) {}
             }
 
-            // 2. Si destino tiene IP conocida pero no hay socket, conectar y enviar
             val targetIp = peerIpByPhone[packet.destinationPhone]
             if (targetIp != null && !activeClientSockets.containsKey(targetIp)) {
                 try {
@@ -924,7 +895,6 @@ class WiFiMeshEngine(
                 } catch (_: Exception) {}
             }
 
-            // 3. Si soy cliente WiFi Direct, asegurar enlace con el GO
             if (!_engineState.value.isGroupOwner &&
                 !activeClientSockets.containsKey("192.168.49.1") &&
                 _engineState.value.isWifiDirectActive
@@ -939,7 +909,6 @@ class WiFiMeshEngine(
                 } catch (_: Exception) {}
             }
 
-            // 4. UDP broadcast de respaldo
             try {
                 val udp = DatagramSocket().apply { broadcast = true }
                 val targets = mutableListOf("192.168.49.255", "192.168.49.1", "255.255.255.255")
@@ -953,7 +922,6 @@ class WiFiMeshEngine(
                 udp.close()
             } catch (_: Exception) {}
 
-            // 5. WiFi Aware
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && awareSession != null) {
                 val handle = awarePeerHandles[packet.destinationPhone]
                 if (handle != null) {
