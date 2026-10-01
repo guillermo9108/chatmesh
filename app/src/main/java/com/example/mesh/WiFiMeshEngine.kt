@@ -11,6 +11,8 @@ import android.media.AudioManager
 import android.media.AudioRecord
 import android.media.AudioTrack
 import android.media.MediaRecorder
+import android.media.audiofx.AcousticEchoCanceler
+import android.media.audiofx.NoiseSuppressor
 import android.net.wifi.WpsInfo
 import android.net.wifi.aware.*
 import android.net.wifi.p2p.*
@@ -51,6 +53,10 @@ class WiFiMeshEngine(
     private val AUDIO_UDP_PORT = 8991
     val MESH_GLOBAL_PASSPHRASE = "12345678"
 
+    // Tamaño de chunk de medios (más grande = menos overhead, más rápido)
+    private val MEDIA_CHUNK_SIZE = 4096
+    private val CHUNK_DELAY_MS = 8L
+
     val videoCallManager = P2pVideoCallManager(context)
 
     private val _engineState = MutableStateFlow(MeshEngineState())
@@ -89,6 +95,10 @@ class WiFiMeshEngine(
     private var audioServerSocket: DatagramSocket? = null
     private var audioSendSocket: DatagramSocket? = null
     private var callTimerJob: Job? = null
+
+    // Efectos de audio para evitar eco y ruido
+    private var echoCanceler: AcousticEchoCanceler? = null
+    private var noiseSuppressor: NoiseSuppressor? = null
 
     // ============================================================
     //  RECEIVER WiFi Direct
@@ -405,12 +415,9 @@ class WiFiMeshEngine(
     fun connectToPeer(device: WifiP2pDevice) {
         val ch = p2pChannel ?: return
 
-        // groupOwnerIntent solo está disponible en el constructor clásico
-        // de WifiP2pConfig, no en WifiP2pConfig.Builder (API Q+).
         @Suppress("DEPRECATION")
         val config = WifiP2pConfig().apply {
             deviceAddress = device.deviceAddress
-            // 15 = preferimos ser CLIENTE, no GO (regla determinística)
             groupOwnerIntent = 15
             wps.setup = WpsInfo.PBC
         }
@@ -440,11 +447,6 @@ class WiFiMeshEngine(
         })
     }
 
-    /**
-     * Auto-conexión DETERMINÍSTICA.
-     * Regla: solo el dispositivo con el número "menor" inicia connect().
-     * El otro espera pasivamente a que el GO se forme.
-     */
     fun evaluateAndAutoConnectToBestNode() {
         if (_engineState.value.isWifiDirectActive && _engineState.value.isGroupOwner) return
         if (activeClientSockets.isNotEmpty()) return
@@ -625,8 +627,8 @@ class WiFiMeshEngine(
             socket.tcpNoDelay = true
             socket.keepAlive = true
             socket.soTimeout = 60_000
-            socket.sendBufferSize = 256 * 1024
-            socket.receiveBufferSize = 256 * 1024
+            socket.sendBufferSize = 512 * 1024
+            socket.receiveBufferSize = 512 * 1024
         } catch (_: Exception) {}
     }
 
@@ -797,7 +799,7 @@ class WiFiMeshEngine(
     }
 
     // ============================================================
-    //  Envío de mensajes
+    //  Envío de mensajes (con chunking robusto)
     // ============================================================
     fun sendChatMessage(
         recipientPhone: String,
@@ -825,12 +827,12 @@ class WiFiMeshEngine(
             repository.saveMessage(entity)
 
             val rawData = mediaData.orEmpty()
-            if (rawData.length > 2048) {
-                val chunkSize = 2048
-                val totalChunks = (rawData.length + chunkSize - 1) / chunkSize
+            if (rawData.length > MEDIA_CHUNK_SIZE) {
+                val totalChunks = (rawData.length + MEDIA_CHUNK_SIZE - 1) / MEDIA_CHUNK_SIZE
+                Log.i(TAG, "Enviando $mediaType de $totalChunks chunks (${rawData.length} chars)")
                 for (i in 0 until totalChunks) {
-                    val start = i * chunkSize
-                    val end = minOf(start + chunkSize, rawData.length)
+                    val start = i * MEDIA_CHUNK_SIZE
+                    val end = minOf(start + MEDIA_CHUNK_SIZE, rawData.length)
                     val chunkData = rawData.substring(start, end)
                     val packet = MeshPacket(
                         packetType = "CHAT_CHUNK",
@@ -849,8 +851,27 @@ class WiFiMeshEngine(
                         totalChunks = totalChunks
                     )
                     transmitMeshPacket(packet)
-                    delay(30)
+                    delay(CHUNK_DELAY_MS)
                 }
+                // Enviar un mensaje "final" que también registra el estado en el receptor
+                val finalPacket = MeshPacket(
+                    packetType = "CHAT_CHUNK_END",
+                    packetUuid = messageUuid,
+                    sourceNodeId = _engineState.value.myNodeId,
+                    sourcePhone = _engineState.value.myPhoneNumber,
+                    sourceName = _engineState.value.myNickname.ifBlank { "Usuario" },
+                    sourceSsid = _engineState.value.ssid,
+                    sourceAvatar = _engineState.value.myAvatarUri,
+                    destinationPhone = recipientPhone,
+                    content = content,
+                    mediaType = mediaType,
+                    mediaData = null,
+                    audioDuration = audioDuration,
+                    chunkIndex = totalChunks,
+                    totalChunks = totalChunks
+                )
+                storeAndForwardQueue[messageUuid] = PendingRetry(finalPacket)
+                transmitMeshPacket(finalPacket)
             } else {
                 val packet = MeshPacket(
                     packetType = "CHAT_MESSAGE",
@@ -909,18 +930,21 @@ class WiFiMeshEngine(
                 } catch (_: Exception) {}
             }
 
-            try {
-                val udp = DatagramSocket().apply { broadcast = true }
-                val targets = mutableListOf("192.168.49.255", "192.168.49.1", "255.255.255.255")
-                if (targetIp != null && !targets.contains(targetIp)) targets.add(targetIp)
-                for (tip in targets) {
-                    try {
-                        val addr = InetAddress.getByName(tip)
-                        udp.send(DatagramPacket(data, data.size, addr, UDP_BEACON_PORT))
-                    } catch (_: Exception) {}
-                }
-                udp.close()
-            } catch (_: Exception) {}
+            // UDP broadcast como respaldo (solo para paquetes de control, no chunks)
+            if (packet.packetType != "CHAT_CHUNK" && packet.packetType != "CHAT_CHUNK_END") {
+                try {
+                    val udp = DatagramSocket().apply { broadcast = true }
+                    val targets = mutableListOf("192.168.49.255", "192.168.49.1", "255.255.255.255")
+                    if (targetIp != null && !targets.contains(targetIp)) targets.add(targetIp)
+                    for (tip in targets) {
+                        try {
+                            val addr = InetAddress.getByName(tip)
+                            udp.send(DatagramPacket(data, data.size, addr, UDP_BEACON_PORT))
+                        } catch (_: Exception) {}
+                    }
+                    udp.close()
+                } catch (_: Exception) {}
+            }
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && awareSession != null) {
                 val handle = awarePeerHandles[packet.destinationPhone]
@@ -949,7 +973,16 @@ class WiFiMeshEngine(
 
     fun processIncomingPacket(packet: MeshPacket) {
         scope.launch {
-            if (!receivedPacketUuids.add(packet.packetUuid)) return@launch
+            // ═══════════════════════════════════════════════════════
+            //  FIX CRÍTICO: deduplicación por (uuid, chunkIndex)
+            //  para chunks, y por uuid solo para el resto.
+            // ═══════════════════════════════════════════════════════
+            val dedupKey = if (packet.packetType == "CHAT_CHUNK") {
+                "${packet.packetUuid}#${packet.chunkIndex}"
+            } else {
+                packet.packetUuid
+            }
+            if (!receivedPacketUuids.add(dedupKey)) return@launch
 
             _engineState.value = _engineState.value.copy(
                 packetsReceived = _engineState.value.packetsReceived + 1
@@ -1056,11 +1089,35 @@ class WiFiMeshEngine(
                     if (isForMe) {
                         val chunks = receivedChunks.computeIfAbsent(packet.packetUuid) { ConcurrentHashMap() }
                         packet.mediaData?.let { chunks[packet.chunkIndex] = it }
+                        Log.d(TAG, "Chunk ${packet.chunkIndex + 1}/${packet.totalChunks} para ${packet.packetUuid.take(8)} (${chunks.size} recibidos)")
                         if (chunks.size == packet.totalChunks) {
                             val sorted = (0 until packet.totalChunks).joinToString("") { chunks[it].orEmpty() }
+                            Log.i(TAG, "Mensaje de medios completo: ${packet.mediaType}, ${sorted.length} chars")
                             persistIncomingMessage(packet.copy(mediaData = sorted), myPhone)
                             sendAck(packet.packetUuid, packet.sourcePhone)
                             receivedChunks.remove(packet.packetUuid)
+                            notificationHelper.showIncomingMessageNotification(
+                                packet.sourcePhone,
+                                packet.sourceName.ifBlank { packet.sourcePhone },
+                                when (packet.mediaType) {
+                                    "IMAGE" -> "📷 Foto"
+                                    "AUDIO" -> "🎤 Mensaje de voz"
+                                    "FILE" -> "📎 Archivo"
+                                    else -> packet.content.ifEmpty { "Nuevo mensaje" }
+                                }
+                            )
+                        }
+                    } else {
+                        relayPacket(packet)
+                    }
+                }
+                "CHAT_CHUNK_END" -> {
+                    if (isForMe) {
+                        // El emisor terminó de mandar los chunks. Si ya tenemos todos,
+                        // el mensaje ya fue persistido. Si no, falta algún chunk.
+                        val chunks = receivedChunks[packet.packetUuid]
+                        if (chunks != null && chunks.size < packet.totalChunks) {
+                            Log.w(TAG, "Mensaje ${packet.packetUuid.take(8)} incompleto: ${chunks.size}/${packet.totalChunks}")
                         }
                     } else {
                         relayPacket(packet)
@@ -1209,6 +1266,7 @@ class WiFiMeshEngine(
 
         startCallTimer()
         val peerIp = resolvePeerIp(peer.phoneNumber)
+        Log.i(TAG, "Llamada aceptada, peerIp=$peerIp, video=${_engineState.value.isVideoCall}")
         startRealAudioStreaming(peerIp)
         if (_engineState.value.isVideoCall) videoCallManager.startVideoStream(peerIp)
     }
@@ -1273,6 +1331,7 @@ class WiFiMeshEngine(
                 )
                 startCallTimer()
                 val peerIp = resolvePeerIp(packet.sourcePhone)
+                Log.i(TAG, "Llamada respondida, peerIp=$peerIp, video=${_engineState.value.isVideoCall}")
                 startRealAudioStreaming(peerIp)
                 if (_engineState.value.isVideoCall) videoCallManager.startVideoStream(peerIp)
             }
@@ -1312,6 +1371,10 @@ class WiFiMeshEngine(
         try { audioRecord?.stop(); audioRecord?.release() } catch (_: Exception) {}
         audioRecord = null
         audioSendSocket = null
+        try { echoCanceler?.release() } catch (_: Exception) {}
+        try { noiseSuppressor?.release() } catch (_: Exception) {}
+        echoCanceler = null
+        noiseSuppressor = null
 
         audioRecordJob = scope.launch(Dispatchers.IO) {
             try {
@@ -1337,23 +1400,40 @@ class WiFiMeshEngine(
                 }
                 audioRecord = rec
 
+                // ═══════════════════════════════════════════════════
+                //  FIX: Cancelación de eco y supresión de ruido
+                // ═══════════════════════════════════════════════════
+                try {
+                    if (AcousticEchoCanceler.isAvailable()) {
+                        echoCanceler = AcousticEchoCanceler.create(rec.audioSessionId)
+                        echoCanceler?.enabled = true
+                        Log.i(TAG, "AEC activado")
+                    }
+                    if (NoiseSuppressor.isAvailable()) {
+                        noiseSuppressor = NoiseSuppressor.create(rec.audioSessionId)
+                        noiseSuppressor?.enabled = true
+                        Log.i(TAG, "NS activado")
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "No se pudieron activar efectos de audio", e)
+                }
+
                 val sock = DatagramSocket()
                 audioSendSocket = sock
                 val targetAddr = InetAddress.getByName(peerIp)
                 val buffer = ByteArray(bufferSize)
                 rec.startRecording()
+                Log.i(TAG, "Audio TX iniciado hacia $peerIp")
 
                 while (isActive && _engineState.value.isCallConnected) {
                     if (!_engineState.value.isMicMuted) {
                         val read = rec.read(buffer, 0, buffer.size)
                         if (read > 0) {
+                            // ═══════════════════════════════════════════════
+                            //  FIX: SOLO enviamos al peer. NO al broadcast.
+                            //  El broadcast causaba reproducción duplicada.
+                            // ═══════════════════════════════════════════════
                             sock.send(DatagramPacket(buffer, read, targetAddr, AUDIO_UDP_PORT))
-                            if (peerIp != "192.168.49.1") {
-                                try {
-                                    val bcast = InetAddress.getByName("192.168.49.255")
-                                    sock.send(DatagramPacket(buffer, read, bcast, AUDIO_UDP_PORT))
-                                } catch (_: Exception) {}
-                            }
                         }
                     } else delay(40)
                 }
@@ -1362,8 +1442,12 @@ class WiFiMeshEngine(
             } finally {
                 try { audioRecord?.stop(); audioRecord?.release() } catch (_: Exception) {}
                 try { audioSendSocket?.close() } catch (_: Exception) {}
+                try { echoCanceler?.release() } catch (_: Exception) {}
+                try { noiseSuppressor?.release() } catch (_: Exception) {}
                 audioRecord = null
                 audioSendSocket = null
+                echoCanceler = null
+                noiseSuppressor = null
             }
         }
 
@@ -1380,7 +1464,7 @@ class WiFiMeshEngine(
                     AudioFormat.CHANNEL_OUT_MONO,
                     AudioFormat.ENCODING_PCM_16BIT
                 )
-                val trackBufSize = maxOf(minTrackBuf, bufferSize * 4)
+                val trackBufSize = maxOf(minTrackBuf, bufferSize * 8)
 
                 val attributes = AudioAttributes.Builder()
                     .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
@@ -1405,11 +1489,14 @@ class WiFiMeshEngine(
                 audioServerSocket = srvSock
                 val buffer = ByteArray(bufferSize * 4)
                 trk.play()
+                Log.i(TAG, "Audio RX escuchando en puerto $AUDIO_UDP_PORT")
 
                 while (isActive && _engineState.value.isCallConnected) {
                     val packet = DatagramPacket(buffer, buffer.size)
                     srvSock.receive(packet)
-                    if (packet.length > 0) trk.write(packet.data, 0, packet.length)
+                    if (packet.length > 0) {
+                        trk.write(packet.data, 0, packet.length)
+                    }
                 }
             } catch (e: Exception) {
                 if (_engineState.value.isCallConnected) Log.e(TAG, "Error reproduciendo audio", e)
@@ -1467,10 +1554,14 @@ class WiFiMeshEngine(
         try { audioSendSocket?.close() } catch (_: Exception) {}
         try { audioRecord?.stop(); audioRecord?.release() } catch (_: Exception) {}
         try { audioTrack?.stop(); audioTrack?.release() } catch (_: Exception) {}
+        try { echoCanceler?.release() } catch (_: Exception) {}
+        try { noiseSuppressor?.release() } catch (_: Exception) {}
         audioServerSocket = null
         audioSendSocket = null
         audioRecord = null
         audioTrack = null
+        echoCanceler = null
+        noiseSuppressor = null
 
         videoCallManager.stopVideoStream()
         callTimerJob?.cancel()
