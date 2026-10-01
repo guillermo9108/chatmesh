@@ -8,6 +8,7 @@ import com.example.data.db.ChatMeshDatabase
 import com.example.data.entity.*
 import com.example.data.repository.ChatMeshRepository
 import com.example.mesh.ContactSyncUtil
+import com.example.mesh.MeshEngineHolder
 import com.example.mesh.MeshEngineState
 import com.example.mesh.SimCardInfo
 import com.example.mesh.SimDetectionUtil
@@ -25,7 +26,9 @@ class ChatMeshViewModel(application: Application) : AndroidViewModel(application
         database.callDao()
     )
 
-    val meshEngine = WiFiMeshEngine(application, repository)
+    // El motor es un singleton de proceso. NO lo creamos aquí: lo tomamos del holder.
+    private val meshEngine: WiFiMeshEngine =
+        MeshEngineHolder.engine ?: MeshEngineHolder.init(application, repository)
 
     val userProfile: StateFlow<UserProfile?> = repository.userProfileFlow
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
@@ -99,6 +102,8 @@ class ChatMeshViewModel(application: Application) : AndroidViewModel(application
                         ssid = SimDetectionUtil.generateSsid(number)
                     )
                 )
+                // Refrescar perfil en el motor para que el nuevo SSID se anuncie
+                meshEngine.updateUserProfile(number, current.nickname, current.avatarUri)
             }
         }
     }
@@ -328,8 +333,8 @@ class ChatMeshViewModel(application: Application) : AndroidViewModel(application
         meshEngine.sendUserStatus(phoneNumber, status)
     }
 
-    override fun onCleared() {
-        super.onCleared()
-        meshEngine.cleanUp()
-    }
+    // ⚠️ YA NO HAY onCleared() destructivo.
+    // El motor sobrevive porque vive en MeshEngineHolder y el
+    // MeshForegroundService mantiene el proceso en primer plano.
+    // Solo se destruye cuando el sistema mata el proceso completo.
 }
