@@ -4,7 +4,6 @@ import android.app.Application
 import android.net.wifi.p2p.WifiP2pDevice
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.example.ChatMeshConfig
 import com.example.data.db.ChatMeshDatabase
 import com.example.data.entity.*
 import com.example.data.repository.ChatMeshRepository
@@ -12,7 +11,6 @@ import com.example.mesh.ContactSyncUtil
 import com.example.mesh.DeviceIdentity
 import com.example.mesh.MeshEngineHolder
 import com.example.mesh.MeshEngineState
-import com.example.mesh.PhoneRegistrationApi
 import com.example.mesh.SimCardInfo
 import com.example.mesh.SimDetectionUtil
 import com.example.mesh.WiFiMeshEngine
@@ -53,21 +51,16 @@ class ChatMeshViewModel(application: Application) : AndroidViewModel(application
     val realSimDetails: StateFlow<SimCardInfo> = _realSimDetails.asStateFlow()
 
     // ============================================================
-    //  ESTADO DE REGISTRO
+    //  ESTADO DE REGISTRO MANUAL
     // ============================================================
     private val _registrationRequired = MutableStateFlow(false)
     val registrationRequired: StateFlow<Boolean> = _registrationRequired.asStateFlow()
 
-    private val _isRegistering = MutableStateFlow(false)
-    val isRegistering: StateFlow<Boolean> = _isRegistering.asStateFlow()
-
     private val _registrationError = MutableStateFlow<String?>(null)
     val registrationError: StateFlow<String?> = _registrationError.asStateFlow()
 
-    private val _deviceId = MutableStateFlow("")
-    val deviceId: StateFlow<String> = _deviceId.asStateFlow()
-
-    val registrationApiUrl: String = ChatMeshConfig.REGISTRATION_API_URL
+    private val _detectedPhoneForPrefill = MutableStateFlow("")
+    val detectedPhoneForPrefill: StateFlow<String> = _detectedPhoneForPrefill.asStateFlow()
 
     // ============================================================
     //  ESTADO UI
@@ -82,52 +75,54 @@ class ChatMeshViewModel(application: Application) : AndroidViewModel(application
     val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
 
     init {
-        viewModelScope.launch {
-            bootstrapUser()
-        }
+        viewModelScope.launch { bootstrapUser() }
     }
 
     // ============================================================
-    //  BOOTSTRAP: detecta SIM → si no, pide registro
+    //  BOOTSTRAP: detecta SIM → si no, registro manual
     // ============================================================
     private suspend fun bootstrapUser() {
-        _deviceId.value = DeviceIdentity.getDeviceFingerprint(getApplication())
-
+        // 1. Intentar detectar número real de SIM
         val realPhone = SimDetectionUtil.detectRealPhoneNumber(getApplication())
         if (realPhone != null) {
             SimDetectionUtil.saveUserSimPhoneNumber(getApplication(), realPhone)
-            completeInitialization(realPhone)
+            completeInitialization(realPhone, null)
             return
         }
 
-        val registeredPhone = SimDetectionUtil.getRegisteredPhoneNumber(getApplication())
-        if (registeredPhone != null) {
-            completeInitialization(registeredPhone)
+        // 2. ¿Ya hay un número guardado (manual o SIM previa)?
+        val saved = SimDetectionUtil.getCurrentPhoneNumber(getApplication())
+        if (!saved.isNullOrBlank()) {
+            val existing = repository.getUserProfile()
+            completeInitialization(saved, existing?.nickname)
             return
         }
 
-        // No hay número de SIM ni registro previo: pedir registro
+        // 3. No hay nada → pedir registro manual
         _registrationRequired.value = true
     }
 
-    private suspend fun completeInitialization(phoneNumber: String) {
+    private suspend fun completeInitialization(phoneNumber: String, nicknameOverride: String?) {
         _registrationRequired.value = false
         _registrationError.value = null
 
         val existing = repository.getUserProfile()
+
         if (existing == null) {
+            val nickname = nicknameOverride?.takeIf { it.isNotBlank() } ?: "Usuario"
             val newProfile = UserProfile(
                 phoneNumber = phoneNumber,
-                nickname = "Usuario",
+                nickname = nickname,
                 avatarUri = null,
                 ssid = SimDetectionUtil.generateSsid(phoneNumber)
             )
             repository.saveUserProfile(newProfile)
             meshEngine.initialize(newProfile.phoneNumber, newProfile.nickname, newProfile.avatarUri)
         } else if (existing.phoneNumber != phoneNumber) {
-            // El número cambió (SIM nueva o registro nuevo) → actualizar perfil y motor
+            val nickname = nicknameOverride?.takeIf { it.isNotBlank() } ?: existing.nickname
             val updated = existing.copy(
                 phoneNumber = phoneNumber,
+                nickname = nickname,
                 ssid = SimDetectionUtil.generateSsid(phoneNumber)
             )
             repository.saveUserProfile(updated)
@@ -141,63 +136,31 @@ class ChatMeshViewModel(application: Application) : AndroidViewModel(application
     }
 
     // ============================================================
-    //  REGISTRO VÍA API
+    //  REGISTRO MANUAL
     // ============================================================
-    fun registerDeviceWithApi() {
-        if (_isRegistering.value) return
-        _isRegistering.value = true
+    fun registerDeviceManually(phone: String, nickname: String) {
+        val cleanPhone = SimDetectionUtil.sanitizePhoneNumber(phone)
+        val cleanNickname = nickname.trim().ifBlank { "Usuario" }
+
+        // Validación mínima (la pantalla ya validó, esto es defensa)
+        val digits = cleanPhone.filter { it.isDigit() }
+        if (digits.length < 7 || digits.length > 15 || digits.all { it == '0' }) {
+            _registrationError.value = "Número inválido"
+            return
+        }
+
         _registrationError.value = null
 
+        // Guardar como MANUAL
+        SimDetectionUtil.saveManualPhoneNumber(getApplication(), cleanPhone)
+
         viewModelScope.launch {
-            val app = getApplication<Application>()
-            val deviceId = _deviceId.value.ifBlank {
-                DeviceIdentity.getDeviceFingerprint(app).also { _deviceId.value = it }
-            }
-            val androidId = DeviceIdentity.getAndroidId(app)
-            val imei = DeviceIdentity.getImei(app)
-            val simInfo = SimDetectionUtil.getRealSimDetails(app)
-
-            val result = PhoneRegistrationApi.register(
-                deviceId = deviceId,
-                androidId = androidId,
-                imei = imei,
-                countryIso = simInfo.countryIso,
-                carrierName = simInfo.carrierName
-            )
-
-            result.fold(
-                onSuccess = { reg ->
-                    SimDetectionUtil.saveRegisteredPhoneNumber(app, reg.phoneNumber)
-                    _isRegistering.value = false
-                    completeInitialization(reg.phoneNumber)
-                },
-                onFailure = { err ->
-                    _isRegistering.value = false
-                    _registrationError.value = friendlyError(err)
-                }
-            )
-        }
-    }
-
-    private fun friendlyError(err: Throwable): String {
-        val msg = err.message.orEmpty()
-        return when {
-            msg.contains("Failed to connect", true) ||
-            msg.contains("Unable to resolve host", true) ||
-            msg.contains("Network is unreachable", true) ->
-                "No hay conexión a Internet. Conéctate y reintenta."
-            msg.contains("HTTP 4", true) ->
-                "Error del servidor (${msg.take(80)}). Reintenta más tarde."
-            msg.contains("HTTP 5", true) ->
-                "Servidor no disponible. Reintenta en unos minutos."
-            msg.contains("timeout", true) ->
-                "El servidor tardó demasiado. Reintenta."
-            else -> "Error: ${msg.take(140).ifBlank { "desconocido" }}"
+            completeInitialization(cleanPhone, cleanNickname)
         }
     }
 
     // ============================================================
-    //  Resto de funciones (sin cambios respecto a tu versión actual)
+    //  Resto de funciones (idénticas a tu versión actual)
     // ============================================================
     fun reloadSimDetails() {
         _realSimDetails.value = SimDetectionUtil.getRealSimDetails(getApplication())
