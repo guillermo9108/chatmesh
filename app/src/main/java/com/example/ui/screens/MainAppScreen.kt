@@ -35,11 +35,10 @@ fun MainAppScreen(
     val localVideoBitmap by viewModel.localVideoBitmap.collectAsStateWithLifecycle()
     val remoteVideoBitmap by viewModel.remoteVideoBitmap.collectAsStateWithLifecycle()
 
-    // Estado de registro
+    // Estado de registro manual
     val registrationRequired by viewModel.registrationRequired.collectAsStateWithLifecycle()
-    val isRegistering by viewModel.isRegistering.collectAsStateWithLifecycle()
     val registrationError by viewModel.registrationError.collectAsStateWithLifecycle()
-    val deviceId by viewModel.deviceId.collectAsStateWithLifecycle()
+    val detectedPhoneForPrefill by viewModel.detectedPhoneForPrefill.collectAsStateWithLifecycle()
 
     var selectedTabIndex by remember { mutableIntStateOf(0) }
     var showProfileDialog by remember { mutableStateOf(false) }
@@ -48,6 +47,7 @@ fun MainAppScreen(
     var showGitHubDialog by remember { mutableStateOf(false) }
     var showMeshSettingsDialog by remember { mutableStateOf(false) }
 
+    // Solicitar permisos en runtime
     val permissionsLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
     ) {
@@ -78,14 +78,14 @@ fun MainAppScreen(
             .background(MaterialTheme.colorScheme.background)
     ) {
         when {
-            // PRIORIDAD 0: Pantalla de registro obligatorio
+            // PRIORIDAD 0: Registro manual si no se detecta SIM
             registrationRequired -> {
                 PhoneRegistrationScreen(
-                    deviceId = deviceId,
-                    apiUrl = viewModel.registrationApiUrl,
-                    isRegistering = isRegistering,
+                    initialPhone = detectedPhoneForPrefill,
                     errorMessage = registrationError,
-                    onRegister = { viewModel.registerDeviceWithApi() }
+                    onSubmit = { phone, nickname ->
+                        viewModel.registerDeviceManually(phone, nickname)
+                    }
                 )
             }
 
@@ -114,16 +114,24 @@ fun MainAppScreen(
                     activeRecordingPhone = engineState.activeRecordingContactPhone,
                     onBackClick = { viewModel.selectContact(null) },
                     onSendMessage = { text -> viewModel.sendTextMessage(text) },
-                    onSendImage = { uri, caption, base64 -> viewModel.sendImageMessage(uri, caption, base64) },
-                    onSendAudio = { audioBase64, durationSec -> viewModel.sendAudioMessage(audioBase64, durationSec) },
-                    onSendFile = { fileName -> viewModel.sendFileMessage(fileName, fileName) },
+                    onSendImage = { uri, caption, base64 ->
+                        viewModel.sendImageMessage(uri, caption, base64)
+                    },
+                    onSendAudio = { audioBase64, durationSec ->
+                        viewModel.sendAudioMessage(audioBase64, durationSec)
+                    },
+                    onSendFile = { fileName ->
+                        viewModel.sendFileMessage(fileName, fileName)
+                    },
                     onAudioCallClick = { viewModel.startAudioCall(selectedContact!!) },
                     onVideoCallClick = { viewModel.startVideoCall(selectedContact!!) },
-                    onTypingChange = { status -> viewModel.sendUserStatus(status) }
+                    onTypingChange = { status ->
+                        viewModel.sendUserStatus(status)
+                    }
                 )
             }
 
-            // PRIORIDAD 3: Pantalla principal
+            // PRIORIDAD 3: Pantalla principal con tabs
             else -> {
                 Column(
                     modifier = Modifier
@@ -167,8 +175,11 @@ fun MainAppScreen(
                             3 -> CallsTab(
                                 calls = calls,
                                 onStartCall = { contact, isVideo ->
-                                    if (isVideo) viewModel.startVideoCall(contact)
-                                    else viewModel.startAudioCall(contact)
+                                    if (isVideo) {
+                                        viewModel.startVideoCall(contact)
+                                    } else {
+                                        viewModel.startAudioCall(contact)
+                                    }
                                 }
                             )
                         }
