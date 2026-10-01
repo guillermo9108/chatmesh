@@ -30,13 +30,15 @@ object SimDetectionUtil {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             try {
                 val sm = context.getSystemService(Context.TELEPHONY_SUBSCRIPTION_SERVICE) as? SubscriptionManager
-                val subs = try { sm?.activeSubscriptionInfoList } catch (_: SecurityException) { null }
-                if (!subs.isNullOrEmpty()) {
-                    for (sub in subs) {
-                        try {
-                            val num = sm.getPhoneNumber(sub.subscriptionId)
-                            if (isValidPhoneNumber(num)) return sanitizePhoneNumber(num!!)
-                        } catch (_: Exception) {}
+                if (sm != null) {
+                    val subs = try { sm.activeSubscriptionInfoList } catch (_: SecurityException) { null }
+                    if (!subs.isNullOrEmpty()) {
+                        for (sub in subs) {
+                            try {
+                                val num = sm.getPhoneNumber(sub.subscriptionId)
+                                if (isValidPhoneNumber(num)) return sanitizePhoneNumber(num!!)
+                            } catch (_: Exception) {}
+                        }
                     }
                 }
             } catch (_: Exception) {}
@@ -53,14 +55,16 @@ object SimDetectionUtil {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
             try {
                 val sm = context.getSystemService(Context.TELEPHONY_SUBSCRIPTION_SERVICE) as? SubscriptionManager
-                val subs = try { sm?.activeSubscriptionInfoList } catch (_: SecurityException) { null }
-                if (!subs.isNullOrEmpty()) {
-                    for (sub in subs) {
-                        try {
-                            val perSubTm = tm.createForSubscriptionId(sub.subscriptionId)
-                            val num = perSubTm.line1Number
-                            if (isValidPhoneNumber(num)) return sanitizePhoneNumber(num!!)
-                        } catch (_: Exception) {}
+                if (sm != null) {
+                    val subs = try { sm.activeSubscriptionInfoList } catch (_: SecurityException) { null }
+                    if (!subs.isNullOrEmpty()) {
+                        for (sub in subs) {
+                            try {
+                                val perSubTm = tm.createForSubscriptionId(sub.subscriptionId)
+                                val num = perSubTm.line1Number
+                                if (isValidPhoneNumber(num)) return sanitizePhoneNumber(num!!)
+                            } catch (_: Exception) {}
+                        }
                     }
                 }
             } catch (_: Exception) {}
