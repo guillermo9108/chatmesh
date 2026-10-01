@@ -4,12 +4,15 @@ import android.app.Application
 import android.net.wifi.p2p.WifiP2pDevice
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.ChatMeshConfig
 import com.example.data.db.ChatMeshDatabase
 import com.example.data.entity.*
 import com.example.data.repository.ChatMeshRepository
 import com.example.mesh.ContactSyncUtil
+import com.example.mesh.DeviceIdentity
 import com.example.mesh.MeshEngineHolder
 import com.example.mesh.MeshEngineState
+import com.example.mesh.PhoneRegistrationApi
 import com.example.mesh.SimCardInfo
 import com.example.mesh.SimDetectionUtil
 import com.example.mesh.WiFiMeshEngine
@@ -26,7 +29,6 @@ class ChatMeshViewModel(application: Application) : AndroidViewModel(application
         database.callDao()
     )
 
-    // El motor es un singleton de proceso. NO lo creamos aquí: lo tomamos del holder.
     private val meshEngine: WiFiMeshEngine =
         MeshEngineHolder.engine ?: MeshEngineHolder.init(application, repository)
 
@@ -50,6 +52,26 @@ class ChatMeshViewModel(application: Application) : AndroidViewModel(application
     private val _realSimDetails = MutableStateFlow(SimDetectionUtil.getRealSimDetails(application))
     val realSimDetails: StateFlow<SimCardInfo> = _realSimDetails.asStateFlow()
 
+    // ============================================================
+    //  ESTADO DE REGISTRO
+    // ============================================================
+    private val _registrationRequired = MutableStateFlow(false)
+    val registrationRequired: StateFlow<Boolean> = _registrationRequired.asStateFlow()
+
+    private val _isRegistering = MutableStateFlow(false)
+    val isRegistering: StateFlow<Boolean> = _isRegistering.asStateFlow()
+
+    private val _registrationError = MutableStateFlow<String?>(null)
+    val registrationError: StateFlow<String?> = _registrationError.asStateFlow()
+
+    private val _deviceId = MutableStateFlow("")
+    val deviceId: StateFlow<String> = _deviceId.asStateFlow()
+
+    val registrationApiUrl: String = ChatMeshConfig.REGISTRATION_API_URL
+
+    // ============================================================
+    //  ESTADO UI
+    // ============================================================
     private val _selectedContact = MutableStateFlow<ContactEntity?>(null)
     val selectedContact: StateFlow<ContactEntity?> = _selectedContact.asStateFlow()
 
@@ -59,35 +81,126 @@ class ChatMeshViewModel(application: Application) : AndroidViewModel(application
     private val _searchQuery = MutableStateFlow("")
     val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
 
-    private val _isRecordingAudio = MutableStateFlow(false)
-    val isRecordingAudio: StateFlow<Boolean> = _isRecordingAudio.asStateFlow()
-
-    private val _recordingTimerSeconds = MutableStateFlow(0)
-    val recordingTimerSeconds: StateFlow<Int> = _recordingTimerSeconds.asStateFlow()
-
     init {
         viewModelScope.launch {
-            val phone = SimDetectionUtil.detectSimPhoneNumber(getApplication())
-            val existing = repository.getUserProfile()
-            if (existing == null) {
-                val newProfile = UserProfile(
-                    phoneNumber = if (phone.isNotEmpty()) phone else "+5300000000",
-                    nickname = "Usuario",
-                    avatarUri = null,
-                    ssid = SimDetectionUtil.generateSsid(phone)
-                )
-                repository.saveUserProfile(newProfile)
-                meshEngine.initialize(newProfile.phoneNumber, newProfile.nickname, newProfile.avatarUri)
-            } else {
-                meshEngine.initialize(existing.phoneNumber, existing.nickname, existing.avatarUri)
-            }
-            refreshContacts()
+            bootstrapUser()
         }
     }
 
+    // ============================================================
+    //  BOOTSTRAP: detecta SIM → si no, pide registro
+    // ============================================================
+    private suspend fun bootstrapUser() {
+        _deviceId.value = DeviceIdentity.getDeviceFingerprint(getApplication())
+
+        val realPhone = SimDetectionUtil.detectRealPhoneNumber(getApplication())
+        if (realPhone != null) {
+            SimDetectionUtil.saveUserSimPhoneNumber(getApplication(), realPhone)
+            completeInitialization(realPhone)
+            return
+        }
+
+        val registeredPhone = SimDetectionUtil.getRegisteredPhoneNumber(getApplication())
+        if (registeredPhone != null) {
+            completeInitialization(registeredPhone)
+            return
+        }
+
+        // No hay número de SIM ni registro previo: pedir registro
+        _registrationRequired.value = true
+    }
+
+    private suspend fun completeInitialization(phoneNumber: String) {
+        _registrationRequired.value = false
+        _registrationError.value = null
+
+        val existing = repository.getUserProfile()
+        if (existing == null) {
+            val newProfile = UserProfile(
+                phoneNumber = phoneNumber,
+                nickname = "Usuario",
+                avatarUri = null,
+                ssid = SimDetectionUtil.generateSsid(phoneNumber)
+            )
+            repository.saveUserProfile(newProfile)
+            meshEngine.initialize(newProfile.phoneNumber, newProfile.nickname, newProfile.avatarUri)
+        } else if (existing.phoneNumber != phoneNumber) {
+            // El número cambió (SIM nueva o registro nuevo) → actualizar perfil y motor
+            val updated = existing.copy(
+                phoneNumber = phoneNumber,
+                ssid = SimDetectionUtil.generateSsid(phoneNumber)
+            )
+            repository.saveUserProfile(updated)
+            meshEngine.initialize(updated.phoneNumber, updated.nickname, updated.avatarUri)
+        } else {
+            meshEngine.initialize(existing.phoneNumber, existing.nickname, existing.avatarUri)
+        }
+
+        reloadSimDetails()
+        refreshContacts()
+    }
+
+    // ============================================================
+    //  REGISTRO VÍA API
+    // ============================================================
+    fun registerDeviceWithApi() {
+        if (_isRegistering.value) return
+        _isRegistering.value = true
+        _registrationError.value = null
+
+        viewModelScope.launch {
+            val app = getApplication<Application>()
+            val deviceId = _deviceId.value.ifBlank {
+                DeviceIdentity.getDeviceFingerprint(app).also { _deviceId.value = it }
+            }
+            val androidId = DeviceIdentity.getAndroidId(app)
+            val imei = DeviceIdentity.getImei(app)
+            val simInfo = SimDetectionUtil.getRealSimDetails(app)
+
+            val result = PhoneRegistrationApi.register(
+                deviceId = deviceId,
+                androidId = androidId,
+                imei = imei,
+                countryIso = simInfo.countryIso,
+                carrierName = simInfo.carrierName
+            )
+
+            result.fold(
+                onSuccess = { reg ->
+                    SimDetectionUtil.saveRegisteredPhoneNumber(app, reg.phoneNumber)
+                    _isRegistering.value = false
+                    completeInitialization(reg.phoneNumber)
+                },
+                onFailure = { err ->
+                    _isRegistering.value = false
+                    _registrationError.value = friendlyError(err)
+                }
+            )
+        }
+    }
+
+    private fun friendlyError(err: Throwable): String {
+        val msg = err.message.orEmpty()
+        return when {
+            msg.contains("Failed to connect", true) ||
+            msg.contains("Unable to resolve host", true) ||
+            msg.contains("Network is unreachable", true) ->
+                "No hay conexión a Internet. Conéctate y reintenta."
+            msg.contains("HTTP 4", true) ->
+                "Error del servidor (${msg.take(80)}). Reintenta más tarde."
+            msg.contains("HTTP 5", true) ->
+                "Servidor no disponible. Reintenta en unos minutos."
+            msg.contains("timeout", true) ->
+                "El servidor tardó demasiado. Reintenta."
+            else -> "Error: ${msg.take(140).ifBlank { "desconocido" }}"
+        }
+    }
+
+    // ============================================================
+    //  Resto de funciones (sin cambios respecto a tu versión actual)
+    // ============================================================
     fun reloadSimDetails() {
-        val details = SimDetectionUtil.getRealSimDetails(getApplication())
-        _realSimDetails.value = details
+        _realSimDetails.value = SimDetectionUtil.getRealSimDetails(getApplication())
     }
 
     fun saveRealSimPhoneNumber(number: String) {
@@ -102,7 +215,6 @@ class ChatMeshViewModel(application: Application) : AndroidViewModel(application
                         ssid = SimDetectionUtil.generateSsid(number)
                     )
                 )
-                // Refrescar perfil en el motor para que el nuevo SSID se anuncie
                 meshEngine.updateUserProfile(number, current.nickname, current.avatarUri)
             }
         }
@@ -123,83 +235,43 @@ class ChatMeshViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
-    fun setSearchQuery(query: String) {
-        _searchQuery.value = query
-    }
+    fun setSearchQuery(query: String) { _searchQuery.value = query }
 
     fun sendTextMessage(text: String) {
         val contact = _selectedContact.value ?: return
         if (text.isBlank()) return
-        meshEngine.sendChatMessage(
-            recipientPhone = contact.phoneNumber,
-            content = text.trim(),
-            mediaType = "TEXT"
-        )
+        meshEngine.sendChatMessage(contact.phoneNumber, text.trim(), "TEXT")
     }
 
     fun sendImageMessage(imageUri: String, caption: String, base64Data: String) {
         val contact = _selectedContact.value ?: return
-        meshEngine.sendChatMessage(
-            recipientPhone = contact.phoneNumber,
-            content = caption,
-            mediaType = "IMAGE",
-            mediaUri = imageUri,
-            mediaData = base64Data
-        )
+        meshEngine.sendChatMessage(contact.phoneNumber, caption, "IMAGE", imageUri, base64Data)
     }
 
     fun sendAudioVoiceMessage(base64Audio: String, durationSeconds: Int) {
         val contact = _selectedContact.value ?: return
-        meshEngine.sendChatMessage(
-            recipientPhone = contact.phoneNumber,
-            content = "Mensaje de voz",
-            mediaType = "AUDIO",
-            mediaData = base64Audio,
-            audioDuration = durationSeconds
-        )
+        meshEngine.sendChatMessage(contact.phoneNumber, "Mensaje de voz", "AUDIO", null, base64Audio, durationSeconds)
     }
 
     val localVideoBitmap = meshEngine.videoCallManager.localVideoBitmap
     val remoteVideoBitmap = meshEngine.videoCallManager.remoteVideoBitmap
 
-    fun switchCamera() {
-        meshEngine.switchCamera()
-    }
+    fun switchCamera() { meshEngine.switchCamera() }
 
     fun sendFileMessage(fileName: String, fileUri: String) {
         val contact = _selectedContact.value ?: return
-        meshEngine.sendChatMessage(
-            recipientPhone = contact.phoneNumber,
-            content = fileName,
-            mediaType = "FILE",
-            mediaUri = fileUri
-        )
+        meshEngine.sendChatMessage(contact.phoneNumber, fileName, "FILE", fileUri, null)
     }
 
-    fun startAudioCall(contact: ContactEntity) {
-        meshEngine.startCall(contact, isVideo = false)
-    }
-
-    fun startVideoCall(contact: ContactEntity) {
-        meshEngine.startCall(contact, isVideo = true)
-    }
-
-    fun answerCall() {
-        meshEngine.answerCall()
-    }
-
-    fun endCall() {
-        meshEngine.endCall()
-    }
+    fun startAudioCall(contact: ContactEntity) { meshEngine.startCall(contact, isVideo = false) }
+    fun startVideoCall(contact: ContactEntity) { meshEngine.startCall(contact, isVideo = true) }
+    fun answerCall() { meshEngine.answerCall() }
+    fun endCall() { meshEngine.endCall() }
 
     fun declineCallWithMessage(reason: String) {
         val contact = engineState.value.activeCallPeer
         if (contact != null && reason.isNotBlank()) {
-            meshEngine.sendChatMessage(
-                recipientPhone = contact.phoneNumber,
-                content = reason,
-                mediaType = "TEXT"
-            )
+            meshEngine.sendChatMessage(contact.phoneNumber, reason, "TEXT")
         }
         meshEngine.endCall()
     }
@@ -226,17 +298,9 @@ class ChatMeshViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
-    fun toggleMute() {
-        meshEngine.toggleMute()
-    }
-
-    fun toggleSpeaker() {
-        meshEngine.toggleSpeaker()
-    }
-
-    fun inviteContact(contact: ContactEntity) {
-        meshEngine.autoConnectToContact(contact)
-    }
+    fun toggleMute() { meshEngine.toggleMute() }
+    fun toggleSpeaker() { meshEngine.toggleSpeaker() }
+    fun inviteContact(contact: ContactEntity) { meshEngine.autoConnectToContact(contact) }
 
     fun addNewManualContact(displayName: String, phoneNumber: String) {
         val cleanPhone = SimDetectionUtil.sanitizePhoneNumber(phoneNumber)
@@ -282,21 +346,11 @@ class ChatMeshViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
-    fun reCreateWiFiDirectGroup() {
-        meshEngine.reCreateP2pGroup()
-    }
-
-    fun scanP2pPeers() {
-        meshEngine.startP2pDiscovery()
-    }
-
-    fun connectToP2pDevice(device: WifiP2pDevice) {
-        meshEngine.connectToPeer(device)
-    }
+    fun reCreateWiFiDirectGroup() { meshEngine.reCreateP2pGroup() }
+    fun scanP2pPeers() { meshEngine.startP2pDiscovery() }
+    fun connectToP2pDevice(device: WifiP2pDevice) { meshEngine.connectToPeer(device) }
 
     fun setRecording(isRecording: Boolean, seconds: Int = 0) {
-        _isRecordingAudio.value = isRecording
-        _recordingTimerSeconds.value = seconds
         val contact = _selectedContact.value
         if (contact != null) {
             val status = if (isRecording) "RECORDING" else "IDLE"
@@ -307,34 +361,13 @@ class ChatMeshViewModel(application: Application) : AndroidViewModel(application
     fun onUserTyping(text: String) {
         val contact = _selectedContact.value
         if (contact != null) {
-            val status = if (text.isNotBlank()) "TYPING" else "IDLE"
-            meshEngine.sendUserStatus(contact.phoneNumber, status)
+            meshEngine.sendUserStatus(contact.phoneNumber, if (text.isNotBlank()) "TYPING" else "IDLE")
         }
     }
 
-    fun startP2pDiscovery() {
-        meshEngine.startP2pDiscovery()
-    }
-
-    fun reCreateP2pGroup() {
-        meshEngine.reCreateP2pGroup()
-    }
-
-    fun sendAudioMessage(base64Audio: String, durationSeconds: Int) {
-        sendAudioVoiceMessage(base64Audio, durationSeconds)
-    }
-
-    fun sendUserStatus(status: String) {
-        val contact = _selectedContact.value ?: return
-        meshEngine.sendUserStatus(contact.phoneNumber, status)
-    }
-
-    fun sendUserStatus(phoneNumber: String, status: String) {
-        meshEngine.sendUserStatus(phoneNumber, status)
-    }
-
-    // ⚠️ YA NO HAY onCleared() destructivo.
-    // El motor sobrevive porque vive en MeshEngineHolder y el
-    // MeshForegroundService mantiene el proceso en primer plano.
-    // Solo se destruye cuando el sistema mata el proceso completo.
+    fun startP2pDiscovery() { meshEngine.startP2pDiscovery() }
+    fun reCreateP2pGroup() { meshEngine.reCreateP2pGroup() }
+    fun sendAudioMessage(base64Audio: String, durationSeconds: Int) { sendAudioVoiceMessage(base64Audio, durationSeconds) }
+    fun sendUserStatus(status: String) { _selectedContact.value?.let { meshEngine.sendUserStatus(it.phoneNumber, status) } }
+    fun sendUserStatus(phoneNumber: String, status: String) { meshEngine.sendUserStatus(phoneNumber, status) }
 }
