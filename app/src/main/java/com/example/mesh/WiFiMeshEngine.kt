@@ -30,6 +30,8 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.io.BufferedReader
 import java.io.BufferedWriter
 import java.io.InputStreamReader
@@ -53,7 +55,7 @@ class WiFiMeshEngine(
     private val AUDIO_UDP_PORT = 8991
     val MESH_GLOBAL_PASSPHRASE = "12345678"
 
-    // Tamaño de chunk de medios (más grande = menos overhead, más rápido)
+    // Chunks de medios: más grandes = menos paquetes, más rápidos
     private val MEDIA_CHUNK_SIZE = 4096
     private val CHUNK_DELAY_MS = 8L
 
@@ -79,6 +81,7 @@ class WiFiMeshEngine(
     private var udpDiscoverySocket: DatagramSocket? = null
     private val activeClientSockets = ConcurrentHashMap<String, Socket>()
     private val socketWriters = ConcurrentHashMap<Socket, PrintWriter>()
+    private val socketMutexes = ConcurrentHashMap<Socket, Mutex>()
     private val peerIpByPhone = ConcurrentHashMap<String, String>()
     private val peerMetrics = ConcurrentHashMap<String, PeerMetric>()
 
@@ -665,7 +668,10 @@ class WiFiMeshEngine(
                     sourceAvatar = _engineState.value.myAvatarUri,
                     destinationPhone = "BROADCAST"
                 )
-                writerFor(socket).println(handshake.toJson())
+                val mutex = socketMutexes.getOrPut(socket) { Mutex() }
+                mutex.withLock {
+                    writerFor(socket).println(handshake.toJson())
+                }
             } catch (_: Exception) {}
 
             try {
@@ -686,6 +692,7 @@ class WiFiMeshEngine(
             } finally {
                 if (remoteIp.isNotEmpty()) activeClientSockets.remove(remoteIp)
                 socketWriters.remove(socket)?.close()
+                socketMutexes.remove(socket)
                 try { socket.close() } catch (_: Exception) {}
             }
         }
@@ -712,7 +719,10 @@ class WiFiMeshEngine(
                         sourceAvatar = _engineState.value.myAvatarUri,
                         destinationPhone = "BROADCAST"
                     )
-                    writerFor(socket).println(handshake.toJson())
+                    val mutex = socketMutexes.getOrPut(socket) { Mutex() }
+                    mutex.withLock {
+                        writerFor(socket).println(handshake.toJson())
+                    }
 
                     connected = true
                     handleClientSocket(socket)
@@ -777,6 +787,7 @@ class WiFiMeshEngine(
             if (socket.isClosed || !socket.isConnected) {
                 activeClientSockets.remove(ip)
                 socketWriters.remove(socket)?.close()
+                socketMutexes.remove(socket)
             }
         }
     }
@@ -799,7 +810,7 @@ class WiFiMeshEngine(
     }
 
     // ============================================================
-    //  Envío de mensajes (con chunking robusto)
+    //  Envío de mensajes con chunking SERIALIZADO
     // ============================================================
     fun sendChatMessage(
         recipientPhone: String,
@@ -829,7 +840,7 @@ class WiFiMeshEngine(
             val rawData = mediaData.orEmpty()
             if (rawData.length > MEDIA_CHUNK_SIZE) {
                 val totalChunks = (rawData.length + MEDIA_CHUNK_SIZE - 1) / MEDIA_CHUNK_SIZE
-                Log.i(TAG, "Enviando $mediaType de $totalChunks chunks (${rawData.length} chars)")
+                Log.i(TAG, "Enviando $mediaType: $totalChunks chunks, ${rawData.length} chars total")
                 for (i in 0 until totalChunks) {
                     val start = i * MEDIA_CHUNK_SIZE
                     val end = minOf(start + MEDIA_CHUNK_SIZE, rawData.length)
@@ -850,10 +861,10 @@ class WiFiMeshEngine(
                         chunkIndex = i,
                         totalChunks = totalChunks
                     )
-                    transmitMeshPacket(packet)
+                    // Envío SERIALIZADO: cada chunk espera a escribirse antes del siguiente
+                    transmitMeshPacketSync(packet)
                     delay(CHUNK_DELAY_MS)
                 }
-                // Enviar un mensaje "final" que también registra el estado en el receptor
                 val finalPacket = MeshPacket(
                     packetType = "CHAT_CHUNK_END",
                     packetUuid = messageUuid,
@@ -870,8 +881,8 @@ class WiFiMeshEngine(
                     chunkIndex = totalChunks,
                     totalChunks = totalChunks
                 )
-                storeAndForwardQueue[messageUuid] = PendingRetry(finalPacket)
-                transmitMeshPacket(finalPacket)
+                transmitMeshPacketSync(finalPacket)
+                Log.i(TAG, "Chunks de ${messageUuid.take(8)} enviados completos")
             } else {
                 val packet = MeshPacket(
                     packetType = "CHAT_MESSAGE",
@@ -888,74 +899,106 @@ class WiFiMeshEngine(
                     audioDuration = audioDuration
                 )
                 storeAndForwardQueue[messageUuid] = PendingRetry(packet)
-                transmitMeshPacket(packet)
+                transmitMeshPacketSync(packet)
             }
         }
     }
 
+    /**
+     * Envía un paquete por todos los canales disponibles de forma SERIALIZADA.
+     * Usa un Mutex por socket para evitar que dos paquetes concurrentes
+     * intercalen bytes y corrompan el framing JSON.
+     */
+    private suspend fun transmitMeshPacketSync(packet: MeshPacket) {
+        val json = packet.toJson()
+        val data = json.toByteArray(Charsets.UTF_8)
+
+        // 1. TCP: envío SERIALIZADO por socket con Mutex
+        val socketsSnapshot = activeClientSockets.toMap()
+        for ((_, socket) in socketsSnapshot) {
+            try {
+                if (!socket.isClosed) {
+                    val mutex = socketMutexes.getOrPut(socket) { Mutex() }
+                    mutex.withLock {
+                        try {
+                            writerFor(socket).println(json)
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Error escribiendo a socket: ${e.message}")
+                        }
+                    }
+                }
+            } catch (_: Exception) {}
+        }
+
+        // 2. Si destino tiene IP conocida pero no hay socket, conectar
+        val targetIp = peerIpByPhone[packet.destinationPhone]
+        if (targetIp != null && !activeClientSockets.containsKey(targetIp)) {
+            try {
+                val s = Socket()
+                s.connect(InetSocketAddress(targetIp, TCP_MESH_PORT), 2000)
+                applySocketOptions(s)
+                activeClientSockets[targetIp] = s
+                val mutex = socketMutexes.getOrPut(s) { Mutex() }
+                mutex.withLock {
+                    writerFor(s).println(json)
+                }
+                handleClientSocket(s)
+            } catch (_: Exception) {}
+        }
+
+        // 3. Cliente WiFi Direct: asegurar enlace con el GO
+        if (!_engineState.value.isGroupOwner &&
+            !activeClientSockets.containsKey("192.168.49.1") &&
+            _engineState.value.isWifiDirectActive
+        ) {
+            try {
+                val s = Socket()
+                s.connect(InetSocketAddress("192.168.49.1", TCP_MESH_PORT), 2000)
+                applySocketOptions(s)
+                activeClientSockets["192.168.49.1"] = s
+                val mutex = socketMutexes.getOrPut(s) { Mutex() }
+                mutex.withLock {
+                    writerFor(s).println(json)
+                }
+                handleClientSocket(s)
+            } catch (_: Exception) {}
+        }
+
+        // 4. UDP broadcast SOLO para paquetes de control (no chunks)
+        if (packet.packetType != "CHAT_CHUNK" && packet.packetType != "CHAT_CHUNK_END") {
+            try {
+                val udp = DatagramSocket().apply { broadcast = true }
+                val targets = mutableListOf("192.168.49.255", "192.168.49.1", "255.255.255.255")
+                if (targetIp != null && !targets.contains(targetIp)) targets.add(targetIp)
+                for (tip in targets) {
+                    try {
+                        val addr = InetAddress.getByName(tip)
+                        udp.send(DatagramPacket(data, data.size, addr, UDP_BEACON_PORT))
+                    } catch (_: Exception) {}
+                }
+                udp.close()
+            } catch (_: Exception) {}
+        }
+
+        // 5. WiFi Aware
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && awareSession != null) {
+            val handle = awarePeerHandles[packet.destinationPhone]
+            if (handle != null) {
+                try { publishSession?.sendMessage(handle, 1, data) } catch (_: Exception) {}
+            }
+        }
+
+        _engineState.value = _engineState.value.copy(
+            packetsSent = _engineState.value.packetsSent + 1
+        )
+    }
+
+    /**
+     * Versión fire-and-forget para paquetes de control (beacons, status, etc.).
+     */
     fun transmitMeshPacket(packet: MeshPacket) {
         scope.launch(Dispatchers.IO) {
-            val json = packet.toJson()
-            val data = json.toByteArray(Charsets.UTF_8)
-
-            for ((_, socket) in activeClientSockets) {
-                try {
-                    if (!socket.isClosed) writerFor(socket).println(json)
-                } catch (_: Exception) {}
-            }
-
-            val targetIp = peerIpByPhone[packet.destinationPhone]
-            if (targetIp != null && !activeClientSockets.containsKey(targetIp)) {
-                try {
-                    val s = Socket()
-                    s.connect(InetSocketAddress(targetIp, TCP_MESH_PORT), 2000)
-                    applySocketOptions(s)
-                    activeClientSockets[targetIp] = s
-                    writerFor(s).println(json)
-                    handleClientSocket(s)
-                } catch (_: Exception) {}
-            }
-
-            if (!_engineState.value.isGroupOwner &&
-                !activeClientSockets.containsKey("192.168.49.1") &&
-                _engineState.value.isWifiDirectActive
-            ) {
-                try {
-                    val s = Socket()
-                    s.connect(InetSocketAddress("192.168.49.1", TCP_MESH_PORT), 2000)
-                    applySocketOptions(s)
-                    activeClientSockets["192.168.49.1"] = s
-                    writerFor(s).println(json)
-                    handleClientSocket(s)
-                } catch (_: Exception) {}
-            }
-
-            // UDP broadcast como respaldo (solo para paquetes de control, no chunks)
-            if (packet.packetType != "CHAT_CHUNK" && packet.packetType != "CHAT_CHUNK_END") {
-                try {
-                    val udp = DatagramSocket().apply { broadcast = true }
-                    val targets = mutableListOf("192.168.49.255", "192.168.49.1", "255.255.255.255")
-                    if (targetIp != null && !targets.contains(targetIp)) targets.add(targetIp)
-                    for (tip in targets) {
-                        try {
-                            val addr = InetAddress.getByName(tip)
-                            udp.send(DatagramPacket(data, data.size, addr, UDP_BEACON_PORT))
-                        } catch (_: Exception) {}
-                    }
-                    udp.close()
-                } catch (_: Exception) {}
-            }
-
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && awareSession != null) {
-                val handle = awarePeerHandles[packet.destinationPhone]
-                if (handle != null) {
-                    try { publishSession?.sendMessage(handle, 1, data) } catch (_: Exception) {}
-                }
-            }
-
-            _engineState.value = _engineState.value.copy(
-                packetsSent = _engineState.value.packetsSent + 1
-            )
+            transmitMeshPacketSync(packet)
         }
     }
 
@@ -973,10 +1016,7 @@ class WiFiMeshEngine(
 
     fun processIncomingPacket(packet: MeshPacket) {
         scope.launch {
-            // ═══════════════════════════════════════════════════════
-            //  FIX CRÍTICO: deduplicación por (uuid, chunkIndex)
-            //  para chunks, y por uuid solo para el resto.
-            // ═══════════════════════════════════════════════════════
+            // Deduplicación: chunks por (uuid, chunkIndex), resto por uuid
             val dedupKey = if (packet.packetType == "CHAT_CHUNK") {
                 "${packet.packetUuid}#${packet.chunkIndex}"
             } else {
@@ -1113,11 +1153,11 @@ class WiFiMeshEngine(
                 }
                 "CHAT_CHUNK_END" -> {
                     if (isForMe) {
-                        // El emisor terminó de mandar los chunks. Si ya tenemos todos,
-                        // el mensaje ya fue persistido. Si no, falta algún chunk.
                         val chunks = receivedChunks[packet.packetUuid]
                         if (chunks != null && chunks.size < packet.totalChunks) {
                             Log.w(TAG, "Mensaje ${packet.packetUuid.take(8)} incompleto: ${chunks.size}/${packet.totalChunks}")
+                        } else {
+                            Log.i(TAG, "Mensaje ${packet.packetUuid.take(8)} confirmado completo")
                         }
                     } else {
                         relayPacket(packet)
@@ -1179,7 +1219,7 @@ class WiFiMeshEngine(
             hopCount = packet.hopCount + 1,
             visitedNodeIds = packet.visitedNodeIds + myId
         )
-        transmitMeshPacket(relayed)
+        transmitMeshPacketSync(relayed)
         _engineState.value = _engineState.value.copy(
             packetsRelayed = _engineState.value.packetsRelayed + 1
         )
@@ -1400,9 +1440,6 @@ class WiFiMeshEngine(
                 }
                 audioRecord = rec
 
-                // ═══════════════════════════════════════════════════
-                //  FIX: Cancelación de eco y supresión de ruido
-                // ═══════════════════════════════════════════════════
                 try {
                     if (AcousticEchoCanceler.isAvailable()) {
                         echoCanceler = AcousticEchoCanceler.create(rec.audioSessionId)
@@ -1429,10 +1466,6 @@ class WiFiMeshEngine(
                     if (!_engineState.value.isMicMuted) {
                         val read = rec.read(buffer, 0, buffer.size)
                         if (read > 0) {
-                            // ═══════════════════════════════════════════════
-                            //  FIX: SOLO enviamos al peer. NO al broadcast.
-                            //  El broadcast causaba reproducción duplicada.
-                            // ═══════════════════════════════════════════════
                             sock.send(DatagramPacket(buffer, read, targetAddr, AUDIO_UDP_PORT))
                         }
                     } else delay(40)
@@ -1639,6 +1672,7 @@ class WiFiMeshEngine(
             socketWriters.values.forEach { try { it.close() } catch (_: Exception) {} }
             activeClientSockets.clear()
             socketWriters.clear()
+            socketMutexes.clear()
             p2pManager?.removeGroup(p2pChannel, null)
             isInitialized = false
         } catch (_: Exception) {}

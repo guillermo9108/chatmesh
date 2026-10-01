@@ -17,17 +17,19 @@ import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetAddress
 import java.net.InetSocketAddress
+import java.net.NetworkInterface
 
 class P2pVideoCallManager(private val context: Context) {
     companion object {
         private const val TAG = "P2pVideoCallManager"
         const val VIDEO_UDP_PORT = 8990
 
-        // Resolución reducida para caber en un único datagrama UDP (por debajo del MTU típico ~1400)
-        private const val FRAME_WIDTH = 176
-        private const val FRAME_HEIGHT = 144
-        private const val MAX_PACKET_SIZE = 1200
-        private const val JPEG_QUALITY = 35
+        // Resolución y calidad ajustadas para que cada frame quepa en
+        // UN solo datagrama UDP (< 1400 bytes). Sin fragmentación IP.
+        private const val FRAME_WIDTH = 160
+        private const val FRAME_HEIGHT = 120
+        private const val MAX_PACKET_SIZE = 1350
+        private const val JPEG_QUALITY = 30
     }
 
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
@@ -169,25 +171,33 @@ class P2pVideoCallManager(private val context: Context) {
     }
 
     /**
-     * Comprime el frame a JPEG y lo reduce si excede MAX_PACKET_SIZE.
-     * Devuelve null si es imposible ajustarlo (evitamos fragmentar UDP).
+     * Comprime el frame a JPEG y lo reduce iterativamente hasta que
+     * quepa en MAX_PACKET_SIZE. Devuelve null si es imposible.
+     *
+     * Estrategia: 6 intentos degradando calidad Y resolución.
      */
     private fun encodeFrame(bitmap: Bitmap): ByteArray? {
         var quality = JPEG_QUALITY
         var working = bitmap
-        repeat(3) {
+        var width = bitmap.width
+        var height = bitmap.height
+
+        repeat(6) { attempt ->
             val out = ByteArrayOutputStream()
             working.compress(Bitmap.CompressFormat.JPEG, quality, out)
             val bytes = out.toByteArray()
-            if (bytes.size <= MAX_PACKET_SIZE) return bytes
-            quality = (quality - 10).coerceAtLeast(15)
-            working = Bitmap.createScaledBitmap(
-                working,
-                (working.width * 0.8f).toInt().coerceAtLeast(96),
-                (working.height * 0.8f).toInt().coerceAtLeast(72),
-                true
-            )
+            if (bytes.size <= MAX_PACKET_SIZE) {
+                if (attempt > 0) {
+                    Log.d(TAG, "Frame ajustado en intento $attempt: ${bytes.size} bytes, quality=$quality, ${width}x$height")
+                }
+                return bytes
+            }
+            quality = (quality - 8).coerceAtLeast(12)
+            width = (width * 0.85f).toInt().coerceAtLeast(80)
+            height = (height * 0.85f).toInt().coerceAtLeast(60)
+            working = Bitmap.createScaledBitmap(working, width, height, true)
         }
+        Log.w(TAG, "Frame imposible de comprimir bajo $MAX_PACKET_SIZE bytes, descartado")
         return null
     }
 
@@ -226,12 +236,6 @@ class P2pVideoCallManager(private val context: Context) {
                 }
                 val addr = InetAddress.getByName(currentPeerIp)
                 udpSendSocket?.send(DatagramPacket(frameBytes, frameBytes.size, addr, VIDEO_UDP_PORT))
-
-                // Refuerzo por broadcast del subnet WiFi Direct
-                try {
-                    val bcast = InetAddress.getByName("192.168.49.255")
-                    udpSendSocket?.send(DatagramPacket(frameBytes, frameBytes.size, bcast, VIDEO_UDP_PORT))
-                } catch (_: Exception) {}
             } catch (_: Exception) {}
         }
     }
@@ -248,12 +252,16 @@ class P2pVideoCallManager(private val context: Context) {
                     bind(InetSocketAddress(VIDEO_UDP_PORT))
                 }
                 val buffer = ByteArray(MAX_PACKET_SIZE * 2)
-                Log.i(TAG, "Receptor de video en puerto $VIDEO_UDP_PORT")
+                Log.i(TAG, "Receptor de video escuchando en puerto $VIDEO_UDP_PORT")
 
                 while (isActive && isStreamingActive) {
                     val packet = DatagramPacket(buffer, buffer.size)
                     udpReceiveSocket?.receive(packet)
                     if (packet.length > 0) {
+                        // Filtrar nuestro propio broadcast
+                        val senderIp = packet.address?.hostAddress.orEmpty()
+                        if (senderIp == getLocalP2pIp()) continue
+
                         val bitmap = BitmapFactory.decodeByteArray(packet.data, 0, packet.length)
                         if (bitmap != null) _remoteVideoBitmap.value = bitmap
                     }
@@ -264,6 +272,16 @@ class P2pVideoCallManager(private val context: Context) {
                 try { udpReceiveSocket?.close() } catch (_: Exception) {}
             }
         }
+    }
+
+    private fun getLocalP2pIp(): String {
+        return try {
+            NetworkInterface.getNetworkInterfaces()?.toList()
+                ?.firstOrNull { it.name.lowercase().startsWith("p2p") }
+                ?.inetAddresses?.toList()
+                ?.firstOrNull { it is java.net.Inet4Address && !it.isLoopbackAddress }
+                ?.hostAddress ?: ""
+        } catch (_: Exception) { "" }
     }
 
     private fun findCameraId(manager: CameraManager, front: Boolean): String? {
