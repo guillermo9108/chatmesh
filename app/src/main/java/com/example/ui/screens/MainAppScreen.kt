@@ -9,7 +9,6 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.ui.components.AddContactDialog
 import com.example.ui.components.GitHubInfoDialog
@@ -36,6 +35,12 @@ fun MainAppScreen(
     val localVideoBitmap by viewModel.localVideoBitmap.collectAsStateWithLifecycle()
     val remoteVideoBitmap by viewModel.remoteVideoBitmap.collectAsStateWithLifecycle()
 
+    // Estado de registro
+    val registrationRequired by viewModel.registrationRequired.collectAsStateWithLifecycle()
+    val isRegistering by viewModel.isRegistering.collectAsStateWithLifecycle()
+    val registrationError by viewModel.registrationError.collectAsStateWithLifecycle()
+    val deviceId by viewModel.deviceId.collectAsStateWithLifecycle()
+
     var selectedTabIndex by remember { mutableIntStateOf(0) }
     var showProfileDialog by remember { mutableStateOf(false) }
     var showSimConfigDialog by remember { mutableStateOf(false) }
@@ -43,7 +48,6 @@ fun MainAppScreen(
     var showGitHubDialog by remember { mutableStateOf(false) }
     var showMeshSettingsDialog by remember { mutableStateOf(false) }
 
-    // Request necessary runtime permissions
     val permissionsLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
     ) {
@@ -57,14 +61,13 @@ fun MainAppScreen(
             Manifest.permission.ACCESS_COARSE_LOCATION,
             Manifest.permission.RECORD_AUDIO,
             Manifest.permission.CAMERA,
-            Manifest.permission.READ_CONTACTS
+            Manifest.permission.READ_CONTACTS,
+            Manifest.permission.READ_PHONE_STATE,
+            Manifest.permission.READ_PHONE_NUMBERS
         )
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             permissions.add(Manifest.permission.NEARBY_WIFI_DEVICES)
             permissions.add(Manifest.permission.POST_NOTIFICATIONS)
-        }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            permissions.add(Manifest.permission.READ_PHONE_NUMBERS)
         }
         permissionsLauncher.launch(permissions.toTypedArray())
     }
@@ -74,146 +77,152 @@ fun MainAppScreen(
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
     ) {
-        // Priority 1: Full-screen Call Management UI if a call is active (incoming, connecting, or ongoing)
-        if (engineState.isCallActive && engineState.activeCallPeer != null) {
-            CallScreen(
-                contact = engineState.activeCallPeer!!,
-                engineState = engineState,
-                localVideoBitmap = localVideoBitmap,
-                remoteVideoBitmap = remoteVideoBitmap,
-                onAnswerCall = { viewModel.answerCall() },
-                onEndCall = { viewModel.endCall() },
-                onToggleMute = { viewModel.toggleMute() },
-                onToggleSpeaker = { viewModel.toggleSpeaker() },
-                onSwitchCamera = { viewModel.switchCamera() },
-                onDeclineWithMessage = { reason -> viewModel.declineCallWithMessage(reason) }
-            )
-        }
-        // Priority 2: Chat Detail Screen if a contact is selected
-        else if (selectedContact != null) {
-            ChatDetailScreen(
-                contact = selectedContact!!,
-                messages = activeMessages,
-                activeTypingPhone = engineState.activeTypingContactPhone,
-                activeRecordingPhone = engineState.activeRecordingContactPhone,
-                onBackClick = { viewModel.selectContact(null) },
-                onSendMessage = { text -> viewModel.sendTextMessage(text) },
-                onSendImage = { uri, caption, base64 ->
-                    viewModel.sendImageMessage(uri, caption, base64)
-                },
-                onSendAudio = { audioBase64, durationSec ->
-                    viewModel.sendAudioMessage(audioBase64, durationSec)
-                },
-                onSendFile = { fileName ->
-                    viewModel.sendFileMessage(fileName, fileName)
-                },
-                onAudioCallClick = { viewModel.startAudioCall(selectedContact!!) },
-                onVideoCallClick = { viewModel.startVideoCall(selectedContact!!) },
-                onTypingChange = { status ->
-                    viewModel.sendUserStatus(status)
-                }
-            )
-        }
-        // Priority 3: Main WhatsApp Tab View
-        else {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .statusBarsPadding()
-                    .navigationBarsPadding()
-            ) {
-                WhatsAppTopBar(
-                    selectedTabIndex = selectedTabIndex,
-                    onTabSelected = { selectedTabIndex = it },
-                    onSearchClick = { selectedTabIndex = 1 },
-                    onProfileClick = { showProfileDialog = true },
-                    onSyncContactsClick = { viewModel.refreshContacts() },
-                    onSimConfigClick = { showSimConfigDialog = true },
-                    onMeshSettingsClick = { showMeshSettingsDialog = true },
-                    onGitHubClick = { showGitHubDialog = true },
-                    unreadChatsCount = chatContacts.sumOf { it.unreadCount },
-                    connectedNodesCount = engineState.connectedPeersCount,
-                    ssidName = engineState.ssid
+        when {
+            // PRIORIDAD 0: Pantalla de registro obligatorio
+            registrationRequired -> {
+                PhoneRegistrationScreen(
+                    deviceId = deviceId,
+                    apiUrl = viewModel.registrationApiUrl,
+                    isRegistering = isRegistering,
+                    errorMessage = registrationError,
+                    onRegister = { viewModel.registerDeviceWithApi() }
                 )
+            }
 
-                Box(modifier = Modifier.weight(1f)) {
-                    when (selectedTabIndex) {
-                        0 -> ChatsTab(
-                            chats = chatContacts,
-                            onChatClick = { contact -> viewModel.selectContact(contact) }
-                        )
-                        1 -> ContactsTab(
-                            contacts = allContacts,
-                            searchQuery = searchQuery,
-                            onSearchQueryChange = { q -> viewModel.setSearchQuery(q) },
-                            onContactClick = { contact -> viewModel.selectContact(contact) },
-                            onInviteContact = { contact -> viewModel.inviteContact(contact) }
-                        )
-                        2 -> MeshNodesTab(
-                            engineState = engineState,
-                            meshNodes = meshNodes,
-                            onScanPeers = { viewModel.startP2pDiscovery() },
-                            onConnectDevice = { device -> viewModel.connectToP2pDevice(device) }
-                        )
-                        3 -> CallsTab(
-                            calls = calls,
-                            onStartCall = { contact, isVideo ->
-                                if (isVideo) {
-                                    viewModel.startVideoCall(contact)
-                                } else {
-                                    viewModel.startAudioCall(contact)
+            // PRIORIDAD 1: Llamada activa
+            engineState.isCallActive && engineState.activeCallPeer != null -> {
+                CallScreen(
+                    contact = engineState.activeCallPeer!!,
+                    engineState = engineState,
+                    localVideoBitmap = localVideoBitmap,
+                    remoteVideoBitmap = remoteVideoBitmap,
+                    onAnswerCall = { viewModel.answerCall() },
+                    onEndCall = { viewModel.endCall() },
+                    onToggleMute = { viewModel.toggleMute() },
+                    onToggleSpeaker = { viewModel.toggleSpeaker() },
+                    onSwitchCamera = { viewModel.switchCamera() },
+                    onDeclineWithMessage = { reason -> viewModel.declineCallWithMessage(reason) }
+                )
+            }
+
+            // PRIORIDAD 2: Chat abierto
+            selectedContact != null -> {
+                ChatDetailScreen(
+                    contact = selectedContact!!,
+                    messages = activeMessages,
+                    activeTypingPhone = engineState.activeTypingContactPhone,
+                    activeRecordingPhone = engineState.activeRecordingContactPhone,
+                    onBackClick = { viewModel.selectContact(null) },
+                    onSendMessage = { text -> viewModel.sendTextMessage(text) },
+                    onSendImage = { uri, caption, base64 -> viewModel.sendImageMessage(uri, caption, base64) },
+                    onSendAudio = { audioBase64, durationSec -> viewModel.sendAudioMessage(audioBase64, durationSec) },
+                    onSendFile = { fileName -> viewModel.sendFileMessage(fileName, fileName) },
+                    onAudioCallClick = { viewModel.startAudioCall(selectedContact!!) },
+                    onVideoCallClick = { viewModel.startVideoCall(selectedContact!!) },
+                    onTypingChange = { status -> viewModel.sendUserStatus(status) }
+                )
+            }
+
+            // PRIORIDAD 3: Pantalla principal
+            else -> {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .statusBarsPadding()
+                        .navigationBarsPadding()
+                ) {
+                    WhatsAppTopBar(
+                        selectedTabIndex = selectedTabIndex,
+                        onTabSelected = { selectedTabIndex = it },
+                        onSearchClick = { selectedTabIndex = 1 },
+                        onProfileClick = { showProfileDialog = true },
+                        onSyncContactsClick = { viewModel.refreshContacts() },
+                        onSimConfigClick = { showSimConfigDialog = true },
+                        onMeshSettingsClick = { showMeshSettingsDialog = true },
+                        onGitHubClick = { showGitHubDialog = true },
+                        unreadChatsCount = chatContacts.sumOf { it.unreadCount },
+                        connectedNodesCount = engineState.connectedPeersCount,
+                        ssidName = engineState.ssid
+                    )
+
+                    Box(modifier = Modifier.weight(1f)) {
+                        when (selectedTabIndex) {
+                            0 -> ChatsTab(
+                                chats = chatContacts,
+                                onChatClick = { contact -> viewModel.selectContact(contact) }
+                            )
+                            1 -> ContactsTab(
+                                contacts = allContacts,
+                                searchQuery = searchQuery,
+                                onSearchQueryChange = { q -> viewModel.setSearchQuery(q) },
+                                onContactClick = { contact -> viewModel.selectContact(contact) },
+                                onInviteContact = { contact -> viewModel.inviteContact(contact) }
+                            )
+                            2 -> MeshNodesTab(
+                                engineState = engineState,
+                                meshNodes = meshNodes,
+                                onScanPeers = { viewModel.startP2pDiscovery() },
+                                onConnectDevice = { device -> viewModel.connectToP2pDevice(device) }
+                            )
+                            3 -> CallsTab(
+                                calls = calls,
+                                onStartCall = { contact, isVideo ->
+                                    if (isVideo) viewModel.startVideoCall(contact)
+                                    else viewModel.startAudioCall(contact)
                                 }
-                            }
-                        )
+                            )
+                        }
                     }
                 }
             }
         }
 
-        // Dialogs
-        if (showProfileDialog) {
-            ProfileDialog(
-                userProfile = userProfile,
-                onSaveProfile = { nick, phone, avatarUri ->
-                    viewModel.updateProfile(nick, phone, avatarUri)
-                    showProfileDialog = false
-                },
-                onDismiss = { showProfileDialog = false }
-            )
-        }
+        // Dialogs (solo si no estamos en registro)
+        if (!registrationRequired) {
+            if (showProfileDialog) {
+                ProfileDialog(
+                    userProfile = userProfile,
+                    onSaveProfile = { nick, phone, avatarUri ->
+                        viewModel.updateProfile(nick, phone, avatarUri)
+                        showProfileDialog = false
+                    },
+                    onDismiss = { showProfileDialog = false }
+                )
+            }
 
-        if (showSimConfigDialog) {
-            SimConfigDialog(
-                simInfo = realSimDetails,
-                onSaveNumber = { num ->
-                    viewModel.saveRealSimPhoneNumber(num)
-                    showSimConfigDialog = false
-                },
-                onDismiss = { showSimConfigDialog = false }
-            )
-        }
+            if (showSimConfigDialog) {
+                SimConfigDialog(
+                    simInfo = realSimDetails,
+                    onSaveNumber = { num ->
+                        viewModel.saveRealSimPhoneNumber(num)
+                        showSimConfigDialog = false
+                    },
+                    onDismiss = { showSimConfigDialog = false }
+                )
+            }
 
-        if (showAddContactDialog) {
-            AddContactDialog(
-                onAddContact = { name, phone ->
-                    viewModel.addNewManualContact(name, phone)
-                    showAddContactDialog = false
-                },
-                onDismiss = { showAddContactDialog = false }
-            )
-        }
+            if (showAddContactDialog) {
+                AddContactDialog(
+                    onAddContact = { name, phone ->
+                        viewModel.addNewManualContact(name, phone)
+                        showAddContactDialog = false
+                    },
+                    onDismiss = { showAddContactDialog = false }
+                )
+            }
 
-        if (showGitHubDialog) {
-            GitHubInfoDialog(onDismiss = { showGitHubDialog = false })
-        }
+            if (showGitHubDialog) {
+                GitHubInfoDialog(onDismiss = { showGitHubDialog = false })
+            }
 
-        if (showMeshSettingsDialog) {
-            MeshSettingsDialog(
-                engineState = engineState,
-                onReCreateGroup = { viewModel.reCreateP2pGroup() },
-                onScanPeers = { viewModel.startP2pDiscovery() },
-                onDismiss = { showMeshSettingsDialog = false }
-            )
+            if (showMeshSettingsDialog) {
+                MeshSettingsDialog(
+                    engineState = engineState,
+                    onReCreateGroup = { viewModel.reCreateP2pGroup() },
+                    onScanPeers = { viewModel.startP2pDiscovery() },
+                    onDismiss = { showMeshSettingsDialog = false }
+                )
+            }
         }
     }
 }
