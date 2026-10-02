@@ -16,6 +16,7 @@ import com.example.mesh.MeshForegroundService
 import com.example.ui.screens.MainAppScreen
 import com.example.ui.theme.MyApplicationTheme
 import com.example.ui.viewmodel.ChatMeshViewModel
+import com.example.util.CallRingtonePlayer
 
 class MainActivity : ComponentActivity() {
 
@@ -48,6 +49,13 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+
+        CallRingtonePlayer.stop()
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        CallRingtonePlayer.stop()
     }
 
     override fun onNewIntent(intent: Intent) {

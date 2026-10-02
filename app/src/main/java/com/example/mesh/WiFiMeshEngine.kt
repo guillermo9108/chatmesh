@@ -25,6 +25,7 @@ import com.example.data.entity.ContactEntity
 import com.example.data.entity.MeshNodeEntity
 import com.example.data.entity.MessageEntity
 import com.example.data.repository.ChatMeshRepository
+import com.example.util.CallRingtonePlayer
 import com.example.util.NotificationHelper
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -41,6 +42,18 @@ import java.net.*
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 
+/**
+ * Motor nativo de Malla Wi-Fi Direct y Wi-Fi Aware para ChatMesh.
+ *
+ * NOTA SOBRE DIÁLOGOS DEL SISTEMA:
+ * Por diseño de seguridad en Android, las capas de personalización de fabricantes
+ * (como MIUI/HyperOS de Xiaomi, One UI de Samsung, etc.) pueden exigir confirmación
+ * del usuario al establecer conexiones Wi-Fi Direct P2P.
+ * No obstante, el uso conjunto de creación de Grupo Autónomo explícito (createGroup con
+ * configuración determinista basada en el número telefónico) y la configuración
+ * WpsInfo.PBC (Push Button Configuration) evita la aparición del diálogo en Android AOSP
+ * puro y reduce significativamente las interrupciones en el resto de dispositivos.
+ */
 @SuppressLint("MissingPermission")
 class WiFiMeshEngine(
     private val context: Context,
@@ -59,7 +72,9 @@ class WiFiMeshEngine(
     private val MEDIA_CHUNK_SIZE = 4096
     private val CHUNK_DELAY_MS = 8L
 
-    val videoCallManager = P2pVideoCallManager(context)
+    val videoCallManager = P2pVideoCallManager(context) { base64Frame ->
+        sendVideoFrame(base64Frame)
+    }
 
     private val _engineState = MutableStateFlow(MeshEngineState())
     val engineState: StateFlow<MeshEngineState> = _engineState.asStateFlow()
@@ -165,6 +180,33 @@ class WiFiMeshEngine(
         startRealTcpMeshServer()
         startRealUdpBeaconListener()
         startMeshMaintenanceLoop()
+
+        // Cada dispositivo decide si debe ser GO autónomo basándose en su número
+        // de teléfono. El "mayor" crea grupo autónomo; el "menor" espera para
+        // conectarse como cliente.
+        maybeCreateAutonomousGroup()
+    }
+
+    private fun maybeCreateAutonomousGroup() {
+        // Esperar 3 segundos antes de crear el grupo para dar tiempo al descubrimiento
+        scope.launch {
+            delay(3000)
+            try {
+                val ch = p2pChannel ?: return@launch
+                val myPhone = _engineState.value.myPhoneNumber.filter { it.isDigit() }
+                if (myPhone.isEmpty()) return@launch
+
+                // Si NO hay peers descubiertos, creamos grupo autónomo.
+                // Cuando aparezca otro dispositivo, si es "menor", se conectará
+                // directamente a nuestro grupo sin diálogo.
+                val hasPeers = _engineState.value.discoveredP2pDevices.isNotEmpty()
+                if (!hasPeers) {
+                    createAutonomousP2pGroup(_engineState.value.ssid)
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error creando grupo autónomo inicial", e)
+            }
+        }
     }
 
     fun updateUserProfile(myPhone: String, myNickname: String, myAvatarUri: String?) {
@@ -425,6 +467,8 @@ class WiFiMeshEngine(
             wps.setup = WpsInfo.PBC
         }
 
+        // Si el otro ya está anunciado como GO autónomo en el discovery, conectar
+        // con PBC debería ser silencioso. PBC es el modo que menos diálogos genera.
         if (_engineState.value.isGroupOwner && _engineState.value.connectedPeersCount == 0) {
             p2pManager?.removeGroup(ch, object : WifiP2pManager.ActionListener {
                 override fun onSuccess() = doConnect(config, device.deviceName)
@@ -1112,6 +1156,14 @@ class WiFiMeshEngine(
                     }
                 }
                 "CALL_SIGNAL" -> if (isForMe) handleCallSignal(packet)
+                "VIDEO_FRAME" -> {
+                    if (isForMe) {
+                        Log.i(TAG, "VIDEO_FRAME recibido de ${packet.sourcePhone}, len=${packet.videoFrameBase64?.length ?: 0}")
+                        packet.videoFrameBase64?.let { b64 ->
+                            videoCallManager.onRemoteFrameReceived(b64)
+                        }
+                    }
+                }
                 "CHAT_MESSAGE" -> {
                     if (isForMe) {
                         sendAck(packet.packetUuid, packet.sourcePhone)
@@ -1213,6 +1265,7 @@ class WiFiMeshEngine(
     }
 
     private suspend fun relayPacket(packet: MeshPacket) {
+        if (packet.packetType == "VIDEO_FRAME") return
         val myId = _engineState.value.myNodeId
         if (packet.visitedNodeIds.contains(myId) || packet.hopCount >= packet.maxHops) return
         val relayed = packet.copy(
@@ -1280,7 +1333,25 @@ class WiFiMeshEngine(
         transmitMeshPacket(offer)
     }
 
+    fun sendVideoFrame(base64Frame: String) {
+        val peer = _engineState.value.activeCallPeer ?: return
+        if (!_engineState.value.isCallConnected || !_engineState.value.isVideoCall) return
+        Log.i(TAG, "Enviando VIDEO_FRAME a ${peer.phoneNumber}, len=${base64Frame.length}")
+        val packet = MeshPacket(
+            packetType = "VIDEO_FRAME",
+            sourceNodeId = _engineState.value.myNodeId,
+            sourcePhone = _engineState.value.myPhoneNumber,
+            sourceName = _engineState.value.myNickname.ifBlank { "Usuario" },
+            sourceSsid = _engineState.value.ssid,
+            sourceAvatar = _engineState.value.myAvatarUri,
+            destinationPhone = peer.phoneNumber,
+            videoFrameBase64 = base64Frame
+        )
+        transmitMeshPacket(packet)
+    }
+
     fun answerCall() {
+        CallRingtonePlayer.stop()
         val peer = _engineState.value.activeCallPeer ?: return
         notificationHelper.cancelCallNotification()
 
@@ -1308,7 +1379,7 @@ class WiFiMeshEngine(
         val peerIp = resolvePeerIp(peer.phoneNumber)
         Log.i(TAG, "Llamada aceptada, peerIp=$peerIp, video=${_engineState.value.isVideoCall}")
         startRealAudioStreaming(peerIp)
-        if (_engineState.value.isVideoCall) videoCallManager.startVideoStream(peerIp)
+        if (_engineState.value.isVideoCall) videoCallManager.startVideoStream()
     }
 
     fun handleCallSignal(packet: MeshPacket) {
@@ -1362,6 +1433,7 @@ class WiFiMeshEngine(
                         callerContact.displayName,
                         packet.callIsVideo
                     )
+                    CallRingtonePlayer.start(context)
                 }
             }
             "ANSWER" -> {
@@ -1373,7 +1445,7 @@ class WiFiMeshEngine(
                 val peerIp = resolvePeerIp(packet.sourcePhone)
                 Log.i(TAG, "Llamada respondida, peerIp=$peerIp, video=${_engineState.value.isVideoCall}")
                 startRealAudioStreaming(peerIp)
-                if (_engineState.value.isVideoCall) videoCallManager.startVideoStream(peerIp)
+                if (_engineState.value.isVideoCall) videoCallManager.startVideoStream()
             }
             "HANGUP", "REJECT" -> endCallInternal()
         }
@@ -1581,6 +1653,7 @@ class WiFiMeshEngine(
     }
 
     private fun endCallInternal() {
+        CallRingtonePlayer.stop()
         audioRecordJob?.cancel()
         audioPlayJob?.cancel()
         try { audioServerSocket?.close() } catch (_: Exception) {}

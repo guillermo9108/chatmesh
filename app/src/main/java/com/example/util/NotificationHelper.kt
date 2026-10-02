@@ -115,7 +115,6 @@ class NotificationHelper(private val context: Context) {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        val ringtoneUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
         val title = if (callerName.isNotEmpty()) callerName else callerPhone
 
         val notification = NotificationCompat.Builder(context, CHANNEL_CALLS_ID)
@@ -125,8 +124,6 @@ class NotificationHelper(private val context: Context) {
             .setPriority(NotificationCompat.PRIORITY_MAX)
             .setCategory(NotificationCompat.CATEGORY_CALL)
             .setAutoCancel(true)
-            .setSound(ringtoneUri)
-            .setVibrate(longArrayOf(0, 500, 500, 500, 500))
             .setContentIntent(pendingIntent)
             .setFullScreenIntent(pendingIntent, true)
             .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Rechazar", declinePendingIntent)

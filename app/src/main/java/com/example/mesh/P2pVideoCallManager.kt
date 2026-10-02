@@ -7,32 +7,26 @@ import android.hardware.camera2.*
 import android.media.ImageReader
 import android.os.Handler
 import android.os.HandlerThread
+import android.util.Base64
 import android.util.Log
-import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import java.io.ByteArrayOutputStream
-import java.net.DatagramPacket
-import java.net.DatagramSocket
-import java.net.InetAddress
-import java.net.InetSocketAddress
-import java.net.NetworkInterface
 
-class P2pVideoCallManager(private val context: Context) {
+class P2pVideoCallManager(
+    private val context: Context,
+    private val onFrameReady: (base64Frame: String) -> Unit = {}
+) {
     companion object {
         private const val TAG = "P2pVideoCallManager"
-        const val VIDEO_UDP_PORT = 8990
 
-        // Resolución y calidad ajustadas para que cada frame quepa en
-        // UN solo datagrama UDP (< 1400 bytes). Sin fragmentación IP.
         private const val FRAME_WIDTH = 160
         private const val FRAME_HEIGHT = 120
-        private const val MAX_PACKET_SIZE = 1350
+        private const val MAX_FRAME_SIZE = 1350
         private const val JPEG_QUALITY = 30
+        private const val FRAME_INTERVAL_MS = 125L // Máximo 8 FPS
     }
-
-    private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     private val _localVideoBitmap = MutableStateFlow<Bitmap?>(null)
     val localVideoBitmap: StateFlow<Bitmap?> = _localVideoBitmap.asStateFlow()
@@ -46,31 +40,26 @@ class P2pVideoCallManager(private val context: Context) {
     private var cameraThread: HandlerThread? = null
     private var cameraHandler: Handler? = null
 
-    private var sendVideoJob: Job? = null
-    private var receiveVideoJob: Job? = null
-    private var udpReceiveSocket: DatagramSocket? = null
-    private var udpSendSocket: DatagramSocket? = null
-
-    private var currentPeerIp: String = "192.168.49.1"
     private var isFrontFacing: Boolean = true
 
     @Volatile
     private var isStreamingActive = false
 
-    fun startVideoStream(peerIp: String, frontCamera: Boolean = true) {
-        currentPeerIp = peerIp
+    @Volatile
+    private var lastFrameTimestamp = 0L
+
+    fun startVideoStream(frontCamera: Boolean = true) {
         isFrontFacing = frontCamera
         isStreamingActive = true
+        lastFrameTimestamp = 0L
 
         startCameraBackgroundThread()
-        startVideoReceiver()
         startCameraCapture()
+        Log.i(TAG, "Video streaming iniciado (TCP MeshPacket, max 8 FPS)")
     }
 
     fun stopVideoStream() {
         isStreamingActive = false
-        sendVideoJob?.cancel()
-        receiveVideoJob?.cancel()
 
         try { captureSession?.close() } catch (_: Exception) {}
         captureSession = null
@@ -81,15 +70,10 @@ class P2pVideoCallManager(private val context: Context) {
         try { imageReader?.close() } catch (_: Exception) {}
         imageReader = null
 
-        try { udpReceiveSocket?.close() } catch (_: Exception) {}
-        udpReceiveSocket = null
-
-        try { udpSendSocket?.close() } catch (_: Exception) {}
-        udpSendSocket = null
-
         stopCameraBackgroundThread()
         _localVideoBitmap.value = null
         _remoteVideoBitmap.value = null
+        Log.i(TAG, "Video streaming detenido")
     }
 
     fun switchCamera() {
@@ -101,6 +85,18 @@ class P2pVideoCallManager(private val context: Context) {
             imageReader?.close()
         } catch (_: Exception) {}
         startCameraCapture()
+    }
+
+    fun onRemoteFrameReceived(base64: String) {
+        try {
+            val bytes = Base64.decode(base64, Base64.DEFAULT)
+            val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+            if (bitmap != null) {
+                _remoteVideoBitmap.value = bitmap
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error decodificando frame remoto", e)
+        }
     }
 
     private fun startCameraBackgroundThread() {
@@ -134,6 +130,15 @@ class P2pVideoCallManager(private val context: Context) {
                         image.close()
                         return@setOnImageAvailableListener
                     }
+
+                    // Limitar a máximo 8 FPS (intervalo >= 125ms)
+                    val now = System.currentTimeMillis()
+                    if (now - lastFrameTimestamp < FRAME_INTERVAL_MS) {
+                        image.close()
+                        return@setOnImageAvailableListener
+                    }
+                    lastFrameTimestamp = now
+
                     val buffer = planes[0].buffer
                     val bytes = ByteArray(buffer.remaining())
                     buffer.get(bytes)
@@ -143,10 +148,13 @@ class P2pVideoCallManager(private val context: Context) {
                     if (bitmap != null) {
                         _localVideoBitmap.value = bitmap
                         val jpeg = encodeFrame(bitmap)
-                        if (jpeg != null) sendFrameOverUdp(jpeg)
+                        if (jpeg != null) {
+                            val base64 = Base64.encodeToString(jpeg, Base64.NO_WRAP)
+                            onFrameReady(base64)
+                        }
                     }
                 } catch (e: Exception) {
-                    Log.e(TAG, "Error procesando frame", e)
+                    Log.e(TAG, "Error procesando frame de cámara", e)
                 }
             }, cameraHandler)
 
@@ -166,16 +174,10 @@ class P2pVideoCallManager(private val context: Context) {
                 }
             }, cameraHandler)
         } catch (e: Exception) {
-            Log.e(TAG, "Error iniciando captura", e)
+            Log.e(TAG, "Error iniciando captura de cámara", e)
         }
     }
 
-    /**
-     * Comprime el frame a JPEG y lo reduce iterativamente hasta que
-     * quepa en MAX_PACKET_SIZE. Devuelve null si es imposible.
-     *
-     * Estrategia: 6 intentos degradando calidad Y resolución.
-     */
     private fun encodeFrame(bitmap: Bitmap): ByteArray? {
         var quality = JPEG_QUALITY
         var working = bitmap
@@ -186,9 +188,9 @@ class P2pVideoCallManager(private val context: Context) {
             val out = ByteArrayOutputStream()
             working.compress(Bitmap.CompressFormat.JPEG, quality, out)
             val bytes = out.toByteArray()
-            if (bytes.size <= MAX_PACKET_SIZE) {
+            if (bytes.size <= MAX_FRAME_SIZE) {
                 if (attempt > 0) {
-                    Log.d(TAG, "Frame ajustado en intento $attempt: ${bytes.size} bytes, quality=$quality, ${width}x$height")
+                    Log.d(TAG, "Frame ajustado intento $attempt: ${bytes.size} bytes, ${width}x$height, q=$quality")
                 }
                 return bytes
             }
@@ -197,7 +199,7 @@ class P2pVideoCallManager(private val context: Context) {
             height = (height * 0.85f).toInt().coerceAtLeast(60)
             working = Bitmap.createScaledBitmap(working, width, height, true)
         }
-        Log.w(TAG, "Frame imposible de comprimir bajo $MAX_PACKET_SIZE bytes, descartado")
+        Log.w(TAG, "Frame descartado por superar $MAX_FRAME_SIZE bytes")
         return null
     }
 
@@ -225,63 +227,6 @@ class P2pVideoCallManager(private val context: Context) {
         } catch (e: Exception) {
             Log.e(TAG, "Error creando CaptureSession", e)
         }
-    }
-
-    private fun sendFrameOverUdp(frameBytes: ByteArray) {
-        if (frameBytes.size > MAX_PACKET_SIZE) return
-        scope.launch {
-            try {
-                if (udpSendSocket == null || udpSendSocket?.isClosed == true) {
-                    udpSendSocket = DatagramSocket()
-                }
-                val addr = InetAddress.getByName(currentPeerIp)
-                udpSendSocket?.send(DatagramPacket(frameBytes, frameBytes.size, addr, VIDEO_UDP_PORT))
-            } catch (_: Exception) {}
-        }
-    }
-
-    private fun startVideoReceiver() {
-        receiveVideoJob?.cancel()
-        try { udpReceiveSocket?.close() } catch (_: Exception) {}
-        udpReceiveSocket = null
-
-        receiveVideoJob = scope.launch(Dispatchers.IO) {
-            try {
-                udpReceiveSocket = DatagramSocket(null).apply {
-                    reuseAddress = true
-                    bind(InetSocketAddress(VIDEO_UDP_PORT))
-                }
-                val buffer = ByteArray(MAX_PACKET_SIZE * 2)
-                Log.i(TAG, "Receptor de video escuchando en puerto $VIDEO_UDP_PORT")
-
-                while (isActive && isStreamingActive) {
-                    val packet = DatagramPacket(buffer, buffer.size)
-                    udpReceiveSocket?.receive(packet)
-                    if (packet.length > 0) {
-                        // Filtrar nuestro propio broadcast
-                        val senderIp = packet.address?.hostAddress.orEmpty()
-                        if (senderIp == getLocalP2pIp()) continue
-
-                        val bitmap = BitmapFactory.decodeByteArray(packet.data, 0, packet.length)
-                        if (bitmap != null) _remoteVideoBitmap.value = bitmap
-                    }
-                }
-            } catch (e: Exception) {
-                if (isStreamingActive) Log.e(TAG, "Error receptor video UDP", e)
-            } finally {
-                try { udpReceiveSocket?.close() } catch (_: Exception) {}
-            }
-        }
-    }
-
-    private fun getLocalP2pIp(): String {
-        return try {
-            NetworkInterface.getNetworkInterfaces()?.toList()
-                ?.firstOrNull { it.name.lowercase().startsWith("p2p") }
-                ?.inetAddresses?.toList()
-                ?.firstOrNull { it is java.net.Inet4Address && !it.isLoopbackAddress }
-                ?.hostAddress ?: ""
-        } catch (_: Exception) { "" }
     }
 
     private fun findCameraId(manager: CameraManager, front: Boolean): String? {

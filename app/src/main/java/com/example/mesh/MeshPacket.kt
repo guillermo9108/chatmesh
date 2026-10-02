@@ -5,7 +5,7 @@ import org.json.JSONObject
 import java.util.UUID
 
 data class MeshPacket(
-    val packetType: String, // "CHAT_MESSAGE", "CHAT_CHUNK", "ACK", "STATUS_UPDATE", "HEARTBEAT", "CALL_SIGNAL", "BEACON", "HANDSHAKE"
+    val packetType: String, // "CHAT_MESSAGE", "CHAT_CHUNK", "ACK", "STATUS_UPDATE", "HEARTBEAT", "CALL_SIGNAL", "BEACON", "HANDSHAKE", "VIDEO_FRAME"
     val packetUuid: String = UUID.randomUUID().toString(),
     val sourceNodeId: String,
     val sourcePhone: String,
@@ -29,7 +29,8 @@ data class MeshPacket(
     val totalChunks: Int = 1,
     val nodeLoad: Int = 0,
     val signalDbm: Int = 0,
-    val priority: Int = 1
+    val priority: Int = 1,
+    val videoFrameBase64: String? = null
 ) {
     fun toJson(): String {
         val obj = JSONObject()
@@ -60,6 +61,7 @@ data class MeshPacket(
         obj.put("nodeLoad", nodeLoad)
         obj.put("signalDbm", signalDbm)
         obj.put("priority", priority)
+        if (videoFrameBase64 != null) obj.put("videoFrameBase64", videoFrameBase64)
         return obj.toString()
     }
 
@@ -99,7 +101,8 @@ data class MeshPacket(
                     totalChunks = obj.optInt("totalChunks", 1),
                     nodeLoad = obj.optInt("nodeLoad", 0),
                     signalDbm = obj.optInt("signalDbm", 0),
-                    priority = obj.optInt("priority", 1)
+                    priority = obj.optInt("priority", 1),
+                    videoFrameBase64 = if (obj.has("videoFrameBase64")) obj.getString("videoFrameBase64") else null
                 )
             } catch (e: Exception) {
                 null
