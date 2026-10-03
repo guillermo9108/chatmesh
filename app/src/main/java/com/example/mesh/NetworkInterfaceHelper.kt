@@ -136,7 +136,9 @@ object NetworkInterfaceHelper {
             val network = cm.activeNetwork ?: return null
             val capabilities = cm.getNetworkCapabilities(network) ?: return null
 
-            if (!capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) {
+            if (!capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) &&
+                !capabilities.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)
+            ) {
                 return null
             }
 
@@ -166,7 +168,7 @@ object NetworkInterfaceHelper {
             }
 
             if (localIp.isNullOrBlank()) {
-                localIp = getLocalIpForInterface("wlan")
+                localIp = getLocalIpForInterface("wlan") ?: getLocalIpForInterface("eth")
             }
 
             if (localIp.isNullOrBlank()) return null
@@ -193,18 +195,33 @@ object NetworkInterfaceHelper {
     }
 
     /**
-     * Prioridad: WIFI_DIRECT > HOTSPOT > WIFI_LAN > NONE
-     * Llama a las 3 funciones anteriores en orden y devuelve la primera no nula.
+     * Prioridad: HOTSPOT (si está activo) > WIFI_LAN > WIFI_DIRECT > HOTSPOT nativo > NONE
+     * Detecta el modo de transporte idóneo dando preferencia a redes LAN/Router y Hotspot
      */
     fun detectActiveTransport(context: Context, isHotspotActive: Boolean = false): MeshNetworkInfo? {
+        if (isHotspotActive) {
+            val hotspot = getHotspotInfo()
+            if (hotspot != null) return hotspot
+            return MeshNetworkInfo(
+                transport = MeshTransport.HOTSPOT,
+                localIp = "192.168.43.1",
+                subnetBroadcast = "192.168.43.255",
+                gateway = "192.168.43.1",
+                ssid = "Hotspot Local"
+            )
+        }
+
+        // Si hay punto de acceso detectado en interfaces
         val hotspot = getHotspotInfo()
         if (hotspot != null) return hotspot
 
-        val p2p = getWifiDirectInfo()
-        if (p2p != null) return p2p
-
+        // Si hay conexión WiFi LAN activa (router de casa/oficina o conectado a hotspot de otro móvil)
         val lan = getWifiLanInfo(context)
         if (lan != null) return lan
+
+        // WiFi Direct P2P
+        val p2p = getWifiDirectInfo()
+        if (p2p != null) return p2p
 
         return null
     }

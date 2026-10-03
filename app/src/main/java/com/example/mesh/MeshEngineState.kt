@@ -5,7 +5,6 @@ import com.example.data.entity.ContactEntity
 
 data class MeshEngineState(
     val isWifiDirectActive: Boolean = false,
-    val isWifiAwareActive: Boolean = false,
     val isGroupOwner: Boolean = false,
     val ssid: String = "",
     val passphrase: String = "",

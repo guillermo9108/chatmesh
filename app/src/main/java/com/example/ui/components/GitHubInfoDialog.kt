@@ -37,7 +37,7 @@ fun GitHubInfoDialog(
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
                     text = "ChatMesh funciona como WhatsApp pero sin necesidad de Internet ni datos móviles ni torres de telefonía.\n\n" +
-                            "• Malla P2P con WiFi Direct y WiFi Aware.\n" +
+                            "• Multi-Transporte: WiFi Direct, WiFi LAN y Hotspot Móvil.\n" +
                             "• Store-and-Forward con retransmisión automática.\n" +
                             "• Llamadas de voz y video en tiempo real sobre enlace directo.\n" +
                             "• Soporte para mensajes de voz, fotos y texto.",

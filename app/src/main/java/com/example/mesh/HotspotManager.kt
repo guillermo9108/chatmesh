@@ -36,6 +36,19 @@ class HotspotManager(private val context: Context) {
                 return
             }
 
+            // Android exige que la Ubicación (GPS) esté habilitada para iniciar LocalOnlyHotspot
+            val lm = context.getSystemService(Context.LOCATION_SERVICE) as? android.location.LocationManager
+            val isLocationEnabled = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                lm?.isLocationEnabled == true
+            } else {
+                lm?.isProviderEnabled(android.location.LocationManager.GPS_PROVIDER) == true ||
+                lm?.isProviderEnabled(android.location.LocationManager.NETWORK_PROVIDER) == true
+            }
+            if (!isLocationEnabled) {
+                onError("Debes activar la Ubicación (GPS) en los ajustes del teléfono. Android exige Ubicación encendida para habilitar el Hotspot local.")
+                return
+            }
+
             // Si Wi-Fi está apagado en el móvil, LocalOnlyHotspot falla automáticamente con código 2
             if (!wifiManager.isWifiEnabled) {
                 try {
@@ -78,9 +91,14 @@ class HotspotManager(private val context: Context) {
                     activeSsid = ""
                     activePassword = ""
 
+                    val isEmulator = isEmulator()
                     val userMessage = when (reason) {
                         1 -> "No hay canales Wi-Fi disponibles para el punto de acceso (código 1)."
-                        2 -> "El hardware o sistema no pudo iniciar el Hotspot local automático (código 2). Puede deberse a falta de soporte SoftAP en este dispositivo o Wi-Fi inactivo. Puedes encender el Punto de Acceso normal desde Ajustes del teléfono."
+                        2 -> if (isEmulator) {
+                            "Estás en un emulador virtual (IP 10.0.2.x). Los emuladores no poseen antena de radio física para emitir un Hotspot Wi-Fi. Debes probar el Hotspot en un teléfono móvil físico real. (Nota: el modo WiFi LAN ya está conectado y funcionando en este emulador con éxito)."
+                        } else {
+                            "El hardware de este teléfono no admitió el Hotspot automático por software (código 2). Toca 'Abrir Punto de Acceso del Teléfono' abajo para encender la Zona Wi-Fi nativa de Android."
+                        }
                         3 -> "Modo incompatible: el chip Wi-Fi ya está en uso por otra conexión (código 3)."
                         4 -> "La política del dispositivo u operador restringe la creación del punto de acceso (código 4)."
                         else -> "No se pudo iniciar el hotspot local (código $reason)."
@@ -95,6 +113,25 @@ class HotspotManager(private val context: Context) {
             Log.e(TAG, "Excepción iniciando hotspot", e)
             onError("Error iniciando hotspot: ${e.message}")
         }
+    }
+
+    private fun isEmulator(): Boolean {
+        return (Build.BRAND.startsWith("generic") && Build.DEVICE.startsWith("generic"))
+                || Build.FINGERPRINT.startsWith("generic")
+                || Build.FINGERPRINT.startsWith("unknown")
+                || Build.HARDWARE.contains("goldfish")
+                || Build.HARDWARE.contains("ranchu")
+                || Build.MODEL.contains("google_sdk")
+                || Build.MODEL.contains("Emulator")
+                || Build.MODEL.contains("Android SDK built for x86")
+                || Build.MANUFACTURER.contains("Genymotion")
+                || Build.PRODUCT.contains("sdk_google")
+                || Build.PRODUCT.contains("google_sdk")
+                || Build.PRODUCT.contains("sdk")
+                || Build.PRODUCT.contains("sdk_x86")
+                || Build.PRODUCT.contains("vbox86p")
+                || Build.PRODUCT.contains("emulator")
+                || Build.PRODUCT.contains("simulator")
     }
 
     fun stop() {

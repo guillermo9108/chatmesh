@@ -13,8 +13,8 @@ import android.media.AudioTrack
 import android.media.MediaRecorder
 import android.media.audiofx.AcousticEchoCanceler
 import android.media.audiofx.NoiseSuppressor
+import android.net.wifi.WifiManager
 import android.net.wifi.WpsInfo
-import android.net.wifi.aware.*
 import android.net.wifi.p2p.*
 import android.net.wifi.p2p.nsd.WifiP2pDnsSdServiceInfo
 import android.net.wifi.p2p.nsd.WifiP2pDnsSdServiceRequest
@@ -43,16 +43,12 @@ import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 
 /**
- * Motor nativo de Malla Wi-Fi Direct y Wi-Fi Aware para ChatMesh.
+ * Motor nativo de Malla Wi-Fi Direct, WiFi LAN y Hotspot para ChatMesh.
  *
- * NOTA SOBRE DIÁLOGOS DEL SISTEMA:
- * Por diseño de seguridad en Android, las capas de personalización de fabricantes
- * (como MIUI/HyperOS de Xiaomi, One UI de Samsung, etc.) pueden exigir confirmación
- * del usuario al establecer conexiones Wi-Fi Direct P2P.
- * No obstante, el uso conjunto de creación de Grupo Autónomo explícito (createGroup con
- * configuración determinista basada en el número telefónico) y la configuración
- * WpsInfo.PBC (Push Button Configuration) evita la aparición del diálogo en Android AOSP
- * puro y reduce significativamente las interrupciones en el resto de dispositivos.
+ * Soporta comunicación peer-to-peer sobre:
+ * 1. WiFi LAN (Routers domésticos / de oficina sin internet)
+ * 2. Hotspot local (Punto de acceso creado por el móvil)
+ * 3. WiFi Direct P2P (Malla ad-hoc autónoma)
  */
 @SuppressLint("MissingPermission")
 class WiFiMeshEngine(
@@ -79,6 +75,7 @@ class WiFiMeshEngine(
     val hotspotManager = HotspotManager(context)
     @Volatile private var currentNetworkInfo: MeshNetworkInfo? = null
     private var networkMonitorJob: Job? = null
+    private var multicastLock: WifiManager.MulticastLock? = null
 
     private val _engineState = MutableStateFlow(MeshEngineState())
     val engineState: StateFlow<MeshEngineState> = _engineState.asStateFlow()
@@ -89,12 +86,6 @@ class WiFiMeshEngine(
 
     @Volatile
     private var isInitialized = false
-
-    private var awareManager: WifiAwareManager? = null
-    private var awareSession: WifiAwareSession? = null
-    private var publishSession: PublishDiscoverySession? = null
-    private var subscribeSession: SubscribeDiscoverySession? = null
-    private val awarePeerHandles = ConcurrentHashMap<String, PeerHandle>()
 
     private var serverSocket: ServerSocket? = null
     private var udpDiscoverySocket: DatagramSocket? = null
@@ -180,7 +171,16 @@ class WiFiMeshEngine(
         )
 
         setupP2p(ssid)
-        setupRealWifiAware(ssid)
+
+        // Adquirir MulticastLock para asegurar recepción de paquetes UDP Broadcast en WiFi LAN y Hotspot
+        try {
+            val wm = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
+            multicastLock = wm?.createMulticastLock("ChatMeshMulticastLock")?.apply {
+                setReferenceCounted(true)
+                acquire()
+            }
+        } catch (_: Exception) {}
+
         startRealTcpMeshServer()
         startRealUdpBeaconListener()
         startMeshMaintenanceLoop()
@@ -212,6 +212,8 @@ class WiFiMeshEngine(
                                 networkSsid = info.ssid ?: "",
                                 networkLocalIp = info.localIp
                             )
+                            // Enviar beacon de inmediato al cambiar o detectar transporte
+                            sendHeartbeatAndBeacon()
                         }
                     } else if (_engineState.value.transport != MeshTransport.NONE) {
                         currentNetworkInfo = null
@@ -224,7 +226,7 @@ class WiFiMeshEngine(
                 } catch (e: Exception) {
                     Log.e(TAG, "Error en monitor de red", e)
                 }
-                delay(5000)
+                delay(3000)
             }
         }
     }
@@ -234,6 +236,15 @@ class WiFiMeshEngine(
         scope.launch {
             delay(3000)
             try {
+                // Si ya estamos conectados activamente por WiFi LAN o Hotspot, no crear grupo P2P para evitar interferencia
+                if (currentNetworkInfo?.transport == MeshTransport.WIFI_LAN ||
+                    currentNetworkInfo?.transport == MeshTransport.HOTSPOT ||
+                    hotspotManager.isActive
+                ) {
+                    Log.i(TAG, "Conexión ${currentNetworkInfo?.transport} activa. Omitiendo creación de grupo P2P autónomo.")
+                    return@launch
+                }
+
                 val ch = p2pChannel ?: return@launch
                 val myPhone = _engineState.value.myPhoneNumber.filter { it.isDigit() }
                 if (myPhone.isEmpty()) return@launch
@@ -614,82 +625,6 @@ class WiFiMeshEngine(
     }
 
     // ============================================================
-    //  WiFi Aware
-    // ============================================================
-    private fun setupRealWifiAware(ssid: String) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            try {
-                awareManager = context.getSystemService(Context.WIFI_AWARE_SERVICE) as? WifiAwareManager
-                if (awareManager?.isAvailable == true) attachRealWifiAware(ssid)
-            } catch (_: Exception) {}
-        }
-    }
-
-    private fun attachRealWifiAware(ssid: String) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            awareManager?.attach(object : AttachCallback() {
-                override fun onAttached(session: WifiAwareSession?) {
-                    awareSession = session
-                    _engineState.value = _engineState.value.copy(isWifiAwareActive = true)
-                    publishRealAwareService(ssid)
-                    subscribeRealAwareService()
-                }
-                override fun onAttachFailed() {
-                    _engineState.value = _engineState.value.copy(isWifiAwareActive = false)
-                }
-            }, null)
-        }
-    }
-
-    fun publishRealAwareService(ssid: String) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val config = PublishConfig.Builder()
-                .setServiceName("ChatMeshOffline")
-                .setServiceSpecificInfo(ssid.toByteArray(Charsets.UTF_8))
-                .build()
-            awareSession?.publish(config, object : DiscoverySessionCallback() {
-                override fun onPublishStarted(session: PublishDiscoverySession) {
-                    publishSession = session
-                }
-                override fun onMessageReceived(peerHandle: PeerHandle, message: ByteArray) {
-                    val json = String(message, Charsets.UTF_8)
-                    MeshPacket.fromJson(json)?.let { processIncomingPacket(it) }
-                }
-            }, null)
-        }
-    }
-
-    fun subscribeRealAwareService() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val config = SubscribeConfig.Builder()
-                .setServiceName("ChatMeshOffline")
-                .build()
-            awareSession?.subscribe(config, object : DiscoverySessionCallback() {
-                override fun onSubscribeStarted(session: SubscribeDiscoverySession) {
-                    subscribeSession = session
-                }
-                override fun onServiceDiscovered(
-                    peerHandle: PeerHandle,
-                    serviceSpecificInfo: ByteArray?,
-                    matchFilter: MutableList<ByteArray>?
-                ) {
-                    val discoveredSsid = serviceSpecificInfo?.let { String(it, Charsets.UTF_8) }.orEmpty()
-                    val phone = if (discoveredSsid.startsWith("ChatMesh_"))
-                        discoveredSsid.removePrefix("ChatMesh_") else ""
-                    if (phone.isNotEmpty()) {
-                        awarePeerHandles[phone] = peerHandle
-                        registerNodeFromDnsSd("Nodo Aware", phone, phone)
-                    }
-                }
-                override fun onMessageReceived(peerHandle: PeerHandle, message: ByteArray) {
-                    val json = String(message, Charsets.UTF_8)
-                    MeshPacket.fromJson(json)?.let { processIncomingPacket(it) }
-                }
-            }, null)
-        }
-    }
-
-    // ============================================================
     //  TCP Server + Client
     // ============================================================
     private fun startRealTcpMeshServer() {
@@ -1032,7 +967,7 @@ class WiFiMeshEngine(
             } catch (_: Exception) {}
         }
 
-        // 3. Cliente WiFi Direct: asegurar enlace con el GO
+        // 3. Cliente WiFi Direct o Hotspot: asegurar enlace automático
         if (!_engineState.value.isGroupOwner &&
             !activeClientSockets.containsKey("192.168.49.1") &&
             _engineState.value.isWifiDirectActive
@@ -1042,6 +977,25 @@ class WiFiMeshEngine(
                 s.connect(InetSocketAddress("192.168.49.1", TCP_MESH_PORT), 2000)
                 applySocketOptions(s)
                 activeClientSockets["192.168.49.1"] = s
+                val mutex = socketMutexes.getOrPut(s) { Mutex() }
+                mutex.withLock {
+                    writerFor(s).println(json)
+                }
+                handleClientSocket(s)
+            } catch (_: Exception) {}
+        }
+
+        // Si estamos conectados a un Hotspot (cliente), asegurar enlace TCP con el AP (192.168.43.1)
+        val activeInfo = currentNetworkInfo
+        if ((activeInfo?.transport == MeshTransport.HOTSPOT || activeInfo?.gateway == "192.168.43.1") &&
+            activeInfo?.localIp != "192.168.43.1" &&
+            !activeClientSockets.containsKey("192.168.43.1")
+        ) {
+            try {
+                val s = Socket()
+                s.connect(InetSocketAddress("192.168.43.1", TCP_MESH_PORT), 2000)
+                applySocketOptions(s)
+                activeClientSockets["192.168.43.1"] = s
                 val mutex = socketMutexes.getOrPut(s) { Mutex() }
                 mutex.withLock {
                     writerFor(s).println(json)
@@ -1060,13 +1014,41 @@ class WiFiMeshEngine(
                 if (info != null && info.subnetBroadcast.isNotBlank()) {
                     targets.add(info.subnetBroadcast)
                 }
-                // Mantener 192.168.49.255 solo si transport == WIFI_DIRECT
+                // Si estamos en Hotspot (AP o cliente), difundir en toda la subred 192.168.43.x
+                if (info?.transport == MeshTransport.HOTSPOT || hotspotManager.isActive || info?.localIp?.startsWith("192.168.43.") == true) {
+                    targets.add("192.168.43.255")
+                    targets.add("192.168.43.1")
+                    // Enviar también a los clientes DHCP comunes del punto de acceso
+                    for (i in 2..15) {
+                        targets.add("192.168.43.$i")
+                    }
+                }
+                // Si estamos en WiFi LAN
+                if (info?.transport == MeshTransport.WIFI_LAN) {
+                    if (!info.gateway.isNullOrBlank()) targets.add(info.gateway)
+                }
+                // Si estamos en WiFi Direct
                 if (info?.transport == MeshTransport.WIFI_DIRECT) {
                     targets.add("192.168.49.255")
                     targets.add("192.168.49.1")
                 }
+
+                // Detectar si también hay WiFi LAN activa para enviar baliza a esa red
+                val lanInfo = NetworkInterfaceHelper.getWifiLanInfo(context)
+                if (lanInfo != null && lanInfo.subnetBroadcast.isNotBlank() && !targets.contains(lanInfo.subnetBroadcast)) {
+                    targets.add(lanInfo.subnetBroadcast)
+                    if (!lanInfo.gateway.isNullOrBlank()) targets.add(lanInfo.gateway)
+                }
+
                 // Si destino tiene IP conocida, añadirla también
                 if (targetIp != null && !targets.contains(targetIp)) targets.add(targetIp)
+
+                // Enviar también directamente a todos los pares conocidos en la red local
+                peerIpByPhone.values.forEach { pip ->
+                    if (pip.isNotBlank() && pip != "127.0.0.1" && !targets.contains(pip)) {
+                        targets.add(pip)
+                    }
+                }
 
                 for (tip in targets) {
                     try {
@@ -1076,14 +1058,6 @@ class WiFiMeshEngine(
                 }
                 udp.close()
             } catch (_: Exception) {}
-        }
-
-        // 5. WiFi Aware
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && awareSession != null) {
-            val handle = awarePeerHandles[packet.destinationPhone]
-            if (handle != null) {
-                try { publishSession?.sendMessage(handle, 1, data) } catch (_: Exception) {}
-            }
         }
 
         _engineState.value = _engineState.value.copy(
@@ -1127,6 +1101,9 @@ class WiFiMeshEngine(
             )
 
             val myPhone = _engineState.value.myPhoneNumber
+            val isFromMe = isMatchingPhone(packet.sourcePhone, myPhone) || packet.sourceNodeId == _engineState.value.myNodeId
+            if (isFromMe) return@launch
+
             val isForMe = isMatchingPhone(packet.destinationPhone, myPhone) ||
                     packet.destinationPhone == "BROADCAST" ||
                     (activeClientSockets.isNotEmpty() && packet.sourcePhone != myPhone)
@@ -1151,7 +1128,7 @@ class WiFiMeshEngine(
                     phoneNumber = packet.sourcePhone,
                     nickname = packet.sourceName,
                     ipAddress = peerIpByPhone[packet.sourcePhone] ?: "192.168.49.1",
-                    connectionType = "WIFI_DIRECT",
+                    connectionType = currentNetworkInfo?.transport?.name ?: "WIFI_DIRECT",
                     isDirectNeighbor = true,
                     hopDistance = packet.hopCount,
                     isActive = true
@@ -1187,6 +1164,30 @@ class WiFiMeshEngine(
                                 lastSeen = System.currentTimeMillis()
                             )
                         )
+                    }
+
+                    // Respuesta directa e inmediata si es un BEACON de difusión
+                    if (packet.packetType == "BEACON" && packet.destinationPhone == "BROADCAST") {
+                        val senderIp = peerIpByPhone[packet.sourcePhone]
+                        if (!senderIp.isNullOrBlank() && senderIp != "127.0.0.1") {
+                            scope.launch(Dispatchers.IO) {
+                                try {
+                                    val handshake = MeshPacket(
+                                        packetType = "HANDSHAKE",
+                                        sourceNodeId = _engineState.value.myNodeId,
+                                        sourcePhone = _engineState.value.myPhoneNumber,
+                                        sourceName = _engineState.value.myNickname.ifBlank { "Usuario" },
+                                        sourceSsid = _engineState.value.ssid,
+                                        sourceAvatar = _engineState.value.myAvatarUri,
+                                        destinationPhone = packet.sourcePhone
+                                    )
+                                    val handshakeData = handshake.toJson().toByteArray(Charsets.UTF_8)
+                                    val udp = DatagramSocket()
+                                    udp.send(DatagramPacket(handshakeData, handshakeData.size, InetAddress.getByName(senderIp), UDP_BEACON_PORT))
+                                    udp.close()
+                                } catch (_: Exception) {}
+                            }
+                        }
                     }
                 }
                 "ACK" -> {
@@ -1798,23 +1799,14 @@ class WiFiMeshEngine(
         _engineState.value = _engineState.value.copy(hotspotErrorMessage = null)
 
         scope.launch {
-            // Liberar WifiAware si está activo (NAN y SoftAP son mutuamente excluyentes en la mayoría de los chips)
-            try {
-                publishSession?.close()
-                subscribeSession?.close()
-                awareSession?.close()
-                awareSession = null
-                _engineState.value = _engineState.value.copy(isWifiAwareActive = false)
-            } catch (_: Exception) {}
-
             // Liberar temporalmente el grupo y detener escaneo P2P para evitar conflicto en el chip de radio Wi-Fi
             try {
                 p2pManager?.stopPeerDiscovery(p2pChannel, null)
                 p2pManager?.removeGroup(p2pChannel, null)
             } catch (_: Exception) {}
 
-            // Pausa breve para que el controlador de radio de Android libere la interfaz P2P / Aware
-            delay(700)
+            // Pausa breve para que el controlador de radio de Android libere la interfaz P2P
+            delay(500)
 
             hotspotManager.start(
                 onReady = { ssid, password ->
@@ -1826,7 +1818,7 @@ class WiFiMeshEngine(
                         hotspotErrorMessage = null
                     )
                     scope.launch {
-                        delay(3000)
+                        delay(1500)
                         sendHeartbeatAndBeacon()
                     }
                 },
@@ -1851,6 +1843,17 @@ class WiFiMeshEngine(
             hotspotPassword = "",
             hotspotErrorMessage = null
         )
+        scope.launch {
+            delay(500)
+            val info = NetworkInterfaceHelper.detectActiveTransport(context, false)
+            currentNetworkInfo = info
+            _engineState.value = _engineState.value.copy(
+                transport = info?.transport ?: MeshTransport.NONE,
+                networkSsid = info?.ssid ?: "",
+                networkLocalIp = info?.localIp ?: ""
+            )
+            sendHeartbeatAndBeacon()
+        }
     }
 
     fun clearHotspotError() {
@@ -1863,6 +1866,7 @@ class WiFiMeshEngine(
             audioPlayJob?.cancel()
             meshMaintenanceJob?.cancel()
             callTimerJob?.cancel()
+            networkMonitorJob?.cancel()
             if (isP2pReceiverRegistered) {
                 context.unregisterReceiver(p2pReceiver)
                 isP2pReceiverRegistered = false
@@ -1876,6 +1880,12 @@ class WiFiMeshEngine(
             socketMutexes.clear()
             p2pManager?.removeGroup(p2pChannel, null)
             hotspotManager.stop()
+            try {
+                if (multicastLock?.isHeld == true) {
+                    multicastLock?.release()
+                }
+            } catch (_: Exception) {}
+            multicastLock = null
             isInitialized = false
         } catch (_: Exception) {}
     }

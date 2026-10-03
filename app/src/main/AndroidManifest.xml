@@ -38,7 +38,6 @@
 
     <!-- Hardware features declared non-mandatory for compatibility -->
     <uses-feature android:name="android.hardware.wifi.direct" android:required="false" />
-    <uses-feature android:name="android.hardware.wifi.aware" android:required="false" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
     <uses-feature android:name="android.hardware.microphone" android:required="false" />
     <uses-feature android:name="android.hardware.telephony" android:required="false" />
