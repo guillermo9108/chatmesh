@@ -1211,6 +1211,40 @@ class WiFiMeshEngine(
                     }
                 }
                 "CALL_SIGNAL" -> if (isForMe) handleCallSignal(packet)
+                "HOTSPOT_SHARE_REQUEST" -> {
+                    if (isForMe) {
+                        Log.i(TAG, "Solicitud de hotspot de ${packet.sourcePhone} (${packet.sourceName})")
+                        _engineState.value = _engineState.value.copy(
+                            isHotspotSharedByPeer = true,
+                            hotspotPeerPhone = packet.sourcePhone
+                        )
+                        notificationHelper.showHotspotRequestNotification(
+                            packet.sourcePhone,
+                            packet.sourceName.ifBlank { packet.sourcePhone }
+                        )
+                    }
+                }
+                "HOTSPOT_SHARE_OFFER" -> {
+                    if (isForMe) {
+                        val ssid = packet.hotspotSsid
+                        val password = packet.hotspotPassword
+                        if (!ssid.isNullOrBlank() && !password.isNullOrBlank()) {
+                            Log.i(TAG, "Recibidas credenciales de hotspot: SSID=$ssid de ${packet.sourcePhone}")
+                            _engineState.value = _engineState.value.copy(
+                                hotspotSharedSsid = ssid,
+                                hotspotSharedPassword = password,
+                                isHotspotSharedByPeer = true,
+                                hotspotPeerPhone = packet.sourcePhone
+                            )
+                            context.getSharedPreferences("chatmesh_prefs", Context.MODE_PRIVATE)
+                                .edit()
+                                .putString("pending_hotspot_ssid", ssid)
+                                .putString("pending_hotspot_password", password)
+                                .putString("pending_hotspot_peer", packet.sourcePhone)
+                                .apply()
+                        }
+                    }
+                }
                 "VIDEO_FRAME" -> {
                     if (isForMe) {
                         Log.i(TAG, "VIDEO_FRAME recibido de ${packet.sourcePhone}, len=${packet.videoFrameBase64?.length ?: 0}")
@@ -1858,6 +1892,79 @@ class WiFiMeshEngine(
 
     fun clearHotspotError() {
         _engineState.value = _engineState.value.copy(hotspotErrorMessage = null)
+    }
+
+    fun requestHotspotFromPeer(peerPhone: String) {
+        val packet = MeshPacket(
+            packetType = "HOTSPOT_SHARE_REQUEST",
+            sourceNodeId = _engineState.value.myNodeId,
+            sourcePhone = _engineState.value.myPhoneNumber,
+            sourceName = _engineState.value.myNickname,
+            sourceSsid = _engineState.value.ssid,
+            destinationPhone = peerPhone,
+            hotspotRequesterPhone = _engineState.value.myPhoneNumber
+        )
+        transmitMeshPacket(packet)
+        Log.i(TAG, "Solicitando hotspot a $peerPhone")
+    }
+
+    fun shareHotspotWithPeer(peerPhone: String) {
+        scope.launch {
+            if (!hotspotManager.isActive) {
+                Log.w(TAG, "No hay hotspot activo para compartir")
+                return@launch
+            }
+            val ssid = hotspotManager.currentSsid
+            val password = hotspotManager.currentPassword
+            val packet = MeshPacket(
+                packetType = "HOTSPOT_SHARE_OFFER",
+                sourceNodeId = _engineState.value.myNodeId,
+                sourcePhone = _engineState.value.myPhoneNumber,
+                sourceName = _engineState.value.myNickname,
+                sourceSsid = _engineState.value.ssid,
+                destinationPhone = peerPhone,
+                hotspotSsid = ssid,
+                hotspotPassword = password,
+                hotspotRequesterPhone = peerPhone
+            )
+            transmitMeshPacketSync(packet)
+            Log.i(TAG, "Credenciales de hotspot enviadas a $peerPhone (SSID=$ssid)")
+        }
+    }
+
+    fun getPendingHotspotCredentials(): Triple<String, String, String>? {
+        val prefs = context.getSharedPreferences("chatmesh_prefs", Context.MODE_PRIVATE)
+        val ssid = prefs.getString("pending_hotspot_ssid", null)
+        val pass = prefs.getString("pending_hotspot_password", null)
+        val peer = prefs.getString("pending_hotspot_peer", null)
+        return if (!ssid.isNullOrBlank() && !pass.isNullOrBlank() && !peer.isNullOrBlank()) {
+            Triple(ssid, pass, peer)
+        } else null
+    }
+
+    fun clearPendingHotspotCredentials() {
+        context.getSharedPreferences("chatmesh_prefs", Context.MODE_PRIVATE)
+            .edit()
+            .remove("pending_hotspot_ssid")
+            .remove("pending_hotspot_password")
+            .remove("pending_hotspot_peer")
+            .apply()
+        _engineState.value = _engineState.value.copy(
+            hotspotSharedSsid = "",
+            hotspotSharedPassword = "",
+            isHotspotSharedByPeer = false,
+            hotspotPeerPhone = ""
+        )
+    }
+
+    fun getKnownPeerPhones(): List<String> {
+        val list = mutableListOf<String>()
+        peerIpByPhone.keys.forEach { phone ->
+            if (phone.isNotBlank() && phone != _engineState.value.myPhoneNumber && !list.contains(phone)) {
+                list.add(phone)
+            }
+        }
+        return list
     }
 
     fun cleanUp() {

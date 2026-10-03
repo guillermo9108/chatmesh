@@ -47,6 +47,22 @@ fun MainAppScreen(
     var showGitHubDialog by remember { mutableStateOf(false) }
     var showMeshSettingsDialog by remember { mutableStateOf(false) }
 
+    val hotspotRequestFromPeer by viewModel.hotspotRequestFromPeer.collectAsStateWithLifecycle()
+    val hotspotSharedFromPeer by viewModel.hotspotSharedFromPeer.collectAsStateWithLifecycle()
+    val hotspotConnectionStatus by viewModel.hotspotConnectionStatus.collectAsStateWithLifecycle()
+
+    LaunchedEffect(hotspotRequestFromPeer) {
+        if (hotspotRequestFromPeer != null) {
+            showMeshSettingsDialog = true
+        }
+    }
+
+    LaunchedEffect(hotspotSharedFromPeer) {
+        if (hotspotSharedFromPeer) {
+            showMeshSettingsDialog = true
+        }
+    }
+
     // Solicitar permisos en runtime
     val permissionsLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
@@ -235,6 +251,15 @@ fun MainAppScreen(
                     onScanPeers = { viewModel.startP2pDiscovery() },
                     onStartHotspot = { viewModel.startHotspot() },
                     onStopHotspot = { viewModel.stopHotspot() },
+                    hotspotRequestFromPeer = hotspotRequestFromPeer,
+                    hotspotSharedFromPeer = hotspotSharedFromPeer,
+                    hotspotConnectionStatus = hotspotConnectionStatus,
+                    onRequestHotspotFromPeer = { viewModel.requestHotspotFromPeer(it) },
+                    onShareHotspotWithPeer = { viewModel.shareHotspotWithPeer(it) },
+                    onAcceptPendingHotspot = { viewModel.acceptPendingHotspot() },
+                    onDismissHotspotRequest = { viewModel.dismissHotspotRequest() },
+                    onDismissHotspotShared = { viewModel.dismissHotspotSharedFromPeer() },
+                    availablePeerPhones = viewModel.getKnownPeerPhones(),
                     onDismiss = { showMeshSettingsDialog = false }
                 )
             }

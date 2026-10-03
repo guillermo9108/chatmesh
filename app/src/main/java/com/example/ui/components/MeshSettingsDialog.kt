@@ -13,7 +13,7 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material.icons.filled.WifiTethering
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -34,6 +34,15 @@ fun MeshSettingsDialog(
     onScanPeers: () -> Unit,
     onStartHotspot: () -> Unit,
     onStopHotspot: () -> Unit,
+    hotspotRequestFromPeer: String? = null,
+    hotspotSharedFromPeer: Boolean = false,
+    hotspotConnectionStatus: String = "",
+    onRequestHotspotFromPeer: (String) -> Unit = {},
+    onShareHotspotWithPeer: (String) -> Unit = {},
+    onAcceptPendingHotspot: () -> Unit = {},
+    onDismissHotspotRequest: () -> Unit = {},
+    onDismissHotspotShared: () -> Unit = {},
+    availablePeerPhones: List<String> = emptyList(),
     onDismiss: () -> Unit
 ) {
     val scrollState = rememberScrollState()
@@ -325,6 +334,196 @@ fun MeshSettingsDialog(
                                         Icon(Icons.Default.Settings, contentDescription = null, modifier = Modifier.size(16.dp))
                                         Spacer(modifier = Modifier.width(6.dp))
                                         Text("Abrir Punto de Acceso del Teléfono", fontSize = 12.sp)
+                                    }
+                                }
+                            }
+                        }
+
+                        // Estado de conexión a Hotspot (conectando o conectado)
+                        if (hotspotConnectionStatus.isNotBlank()) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Card(
+                                colors = CardDefaults.cardColors(containerColor = WhatsAppTeal.copy(alpha = 0.15f)),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.padding(10.dp)
+                                ) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(16.dp),
+                                        strokeWidth = 2.dp,
+                                        color = WhatsAppTeal
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = hotspotConnectionStatus,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                }
+                            }
+                        }
+
+                        // Hotspot compartido por un peer con credenciales recibidas
+                        if ((engineState.isHotspotSharedByPeer || hotspotSharedFromPeer) && engineState.hotspotSharedSsid.isNotBlank()) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Card(
+                                colors = CardDefaults.cardColors(
+                                    containerColor = MaterialTheme.colorScheme.primaryContainer
+                                ),
+                                modifier = Modifier.fillMaxWidth().testTag("shared_hotspot_card")
+                            ) {
+                                Column(modifier = Modifier.padding(12.dp)) {
+                                    Text(
+                                        text = "Hotspot compartido por ${engineState.hotspotPeerPhone.ifBlank { "un dispositivo" }}",
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 13.sp,
+                                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                                    )
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(
+                                        text = "SSID: ${engineState.hotspotSharedSsid}",
+                                        fontSize = 12.sp,
+                                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                                    )
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        Button(
+                                            onClick = onAcceptPendingHotspot,
+                                            colors = ButtonDefaults.buttonColors(containerColor = WhatsAppTeal),
+                                            modifier = Modifier.weight(1f).testTag("accept_hotspot_button")
+                                        ) {
+                                            Text("Conectar", fontSize = 12.sp)
+                                        }
+                                        OutlinedButton(
+                                            onClick = onDismissHotspotShared,
+                                            modifier = Modifier.weight(1f).testTag("dismiss_hotspot_shared_button")
+                                        ) {
+                                            Text("Cancelar", fontSize = 12.sp)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // Solicitud entrante de un peer que pide conectarse a nuestro Hotspot
+                        if (hotspotRequestFromPeer != null) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Card(
+                                colors = CardDefaults.cardColors(
+                                    containerColor = MaterialTheme.colorScheme.secondaryContainer
+                                ),
+                                modifier = Modifier.fillMaxWidth().testTag("hotspot_request_card")
+                            ) {
+                                Column(modifier = Modifier.padding(12.dp)) {
+                                    Text(
+                                        text = "Un dispositivo quiere conectarse",
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 13.sp,
+                                        color = MaterialTheme.colorScheme.onSecondaryContainer
+                                    )
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(
+                                        text = "Solicitud de $hotspotRequestFromPeer",
+                                        fontSize = 12.sp,
+                                        color = MaterialTheme.colorScheme.onSecondaryContainer
+                                    )
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        Button(
+                                            onClick = { onShareHotspotWithPeer(hotspotRequestFromPeer) },
+                                            colors = ButtonDefaults.buttonColors(containerColor = WhatsAppTeal),
+                                            modifier = Modifier.weight(1f).testTag("share_hotspot_button")
+                                        ) {
+                                            Text("Compartir", fontSize = 12.sp)
+                                        }
+                                        OutlinedButton(
+                                            onClick = onDismissHotspotRequest,
+                                            modifier = Modifier.weight(1f).testTag("reject_hotspot_button")
+                                        ) {
+                                            Text("Rechazar", fontSize = 12.sp)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // Sección: Solicitar hotspot a un peer
+                        Spacer(modifier = Modifier.height(8.dp))
+                        var peerPhoneInput by remember { mutableStateOf("") }
+                        Card(
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.surface
+                            ),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.padding(10.dp)) {
+                                Text(
+                                    text = "Solicitar Hotspot a otro dispositivo:",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = "Pide las credenciales del hotspot a un compañero por la red P2P.",
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Spacer(modifier = Modifier.height(6.dp))
+
+                                val allCandidatePhones = (availablePeerPhones + engineState.discoveredP2pDevices.map { it.deviceName.orEmpty() })
+                                    .filter { it.isNotBlank() && it != engineState.myPhoneNumber }
+                                    .distinct()
+
+                                if (allCandidatePhones.isNotEmpty()) {
+                                    Text(
+                                        text = "Dispositivos cercanos:",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    allCandidatePhones.forEach { p ->
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)
+                                        ) {
+                                            Text(text = p, fontSize = 12.sp, modifier = Modifier.weight(1f))
+                                            TextButton(
+                                                onClick = { onRequestHotspotFromPeer(p) },
+                                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                                            ) {
+                                                Text("Solicitar", fontSize = 11.sp, color = WhatsAppTeal)
+                                            }
+                                        }
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    OutlinedTextField(
+                                        value = peerPhoneInput,
+                                        onValueChange = { peerPhoneInput = it },
+                                        placeholder = { Text("Teléfono de contacto", fontSize = 12.sp) },
+                                        modifier = Modifier.weight(1f),
+                                        singleLine = true
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Button(
+                                        onClick = {
+                                            if (peerPhoneInput.isNotBlank()) {
+                                                onRequestHotspotFromPeer(peerPhoneInput.trim())
+                                                peerPhoneInput = ""
+                                            }
+                                        },
+                                        enabled = peerPhoneInput.isNotBlank(),
+                                        colors = ButtonDefaults.buttonColors(containerColor = WhatsAppTeal),
+                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
+                                    ) {
+                                        Text("Pedir", fontSize = 12.sp)
                                     }
                                 }
                             }

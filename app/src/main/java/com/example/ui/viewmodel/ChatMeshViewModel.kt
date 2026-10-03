@@ -2,6 +2,7 @@ package com.example.ui.viewmodel
 
 import android.app.Application
 import android.net.wifi.p2p.WifiP2pDevice
+import android.os.Build
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.db.ChatMeshDatabase
@@ -9,6 +10,7 @@ import com.example.data.entity.*
 import com.example.data.repository.ChatMeshRepository
 import com.example.mesh.ContactSyncUtil
 import com.example.mesh.DeviceIdentity
+import com.example.mesh.HotspotConnector
 import com.example.mesh.MeshEngineHolder
 import com.example.mesh.MeshEngineState
 import com.example.mesh.SimCardInfo
@@ -74,8 +76,28 @@ class ChatMeshViewModel(application: Application) : AndroidViewModel(application
     private val _searchQuery = MutableStateFlow("")
     val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
 
+    // Flujo de Hotspot Compartido
+    private val _hotspotRequestFromPeer = MutableStateFlow<String?>(null)
+    val hotspotRequestFromPeer: StateFlow<String?> = _hotspotRequestFromPeer.asStateFlow()
+
+    private val _hotspotSharedFromPeer = MutableStateFlow(false)
+    val hotspotSharedFromPeer: StateFlow<Boolean> = _hotspotSharedFromPeer.asStateFlow()
+
+    private val _hotspotConnectionStatus = MutableStateFlow("")
+    val hotspotConnectionStatus: StateFlow<String> = _hotspotConnectionStatus.asStateFlow()
+
     init {
         viewModelScope.launch { bootstrapUser() }
+        viewModelScope.launch {
+            meshEngine.engineState.collect { state ->
+                if (state.isHotspotSharedByPeer && state.hotspotSharedSsid.isNotBlank()) {
+                    _hotspotSharedFromPeer.value = true
+                }
+                if (state.hotspotPeerPhone.isNotBlank() && state.isHotspotSharedByPeer && state.hotspotSharedSsid.isBlank()) {
+                    _hotspotRequestFromPeer.value = state.hotspotPeerPhone
+                }
+            }
+        }
     }
 
     // ============================================================
@@ -328,6 +350,42 @@ class ChatMeshViewModel(application: Application) : AndroidViewModel(application
     fun startHotspot() = meshEngine.startHotspot()
     fun stopHotspot() = meshEngine.stopHotspot()
     fun clearHotspotError() = meshEngine.clearHotspotError()
+
+    // Métodos para Hotspot Compartido P2P
+    fun requestHotspotFromPeer(peerPhone: String) = meshEngine.requestHotspotFromPeer(peerPhone)
+    fun shareHotspotWithPeer(peerPhone: String) = meshEngine.shareHotspotWithPeer(peerPhone)
+
+    fun acceptPendingHotspot() {
+        val creds = meshEngine.getPendingHotspotCredentials() ?: return
+        val (ssid, pass, peer) = creds
+        _hotspotConnectionStatus.value = "Conectando a $ssid..."
+
+        if (!HotspotConnector.isSupported()) {
+            _hotspotConnectionStatus.value = "Requiere Android 10+"
+            return
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            HotspotConnector.connectToHotspot(
+                context = getApplication(),
+                ssid = ssid,
+                password = pass,
+                onConnected = { network ->
+                    _hotspotConnectionStatus.value = "Conectado a $ssid"
+                    meshEngine.clearPendingHotspotCredentials()
+                    _hotspotSharedFromPeer.value = false
+                },
+                onFailed = { error ->
+                    _hotspotConnectionStatus.value = "Error: $error"
+                }
+            )
+        }
+    }
+
+    fun dismissHotspotRequest() { _hotspotRequestFromPeer.value = null }
+    fun dismissHotspotSharedFromPeer() { _hotspotSharedFromPeer.value = false }
+    fun setHotspotRequestFromIntent(phone: String) { _hotspotRequestFromPeer.value = phone }
+    fun getKnownPeerPhones(): List<String> = meshEngine.getKnownPeerPhones()
 
     fun startP2pDiscovery() { meshEngine.startP2pDiscovery() }
     fun reCreateP2pGroup() { meshEngine.reCreateP2pGroup() }

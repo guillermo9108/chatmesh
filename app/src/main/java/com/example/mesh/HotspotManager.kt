@@ -19,6 +19,9 @@ class HotspotManager(private val context: Context) {
     val isActive: Boolean get() = reservation != null
     val currentSsid: String get() = activeSsid
     val currentPassword: String get() = activePassword
+    val currentGatewayIp: String get() = NetworkInterfaceHelper.getGatewayIp(context) ?: "192.168.43.1"
+
+    var onHotspotStarted: ((ssid: String, password: String) -> Unit)? = null
 
     fun start(onReady: (ssid: String, password: String) -> Unit, onError: (String) -> Unit) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
@@ -71,6 +74,7 @@ class HotspotManager(private val context: Context) {
                             activePassword = res.wifiConfiguration?.preSharedKey ?: ""
                         }
                         Log.i(TAG, "Hotspot iniciado con éxito: SSID=$activeSsid")
+                        onHotspotStarted?.invoke(activeSsid, activePassword)
                         onReady(activeSsid, activePassword)
                     } catch (e: Exception) {
                         Log.e(TAG, "Error leyendo credenciales del hotspot", e)

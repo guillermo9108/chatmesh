@@ -30,7 +30,10 @@ data class MeshPacket(
     val nodeLoad: Int = 0,
     val signalDbm: Int = 0,
     val priority: Int = 1,
-    val videoFrameBase64: String? = null
+    val videoFrameBase64: String? = null,
+    val hotspotSsid: String? = null,
+    val hotspotPassword: String? = null,
+    val hotspotRequesterPhone: String? = null
 ) {
     fun toJson(): String {
         val obj = JSONObject()
@@ -62,6 +65,9 @@ data class MeshPacket(
         obj.put("signalDbm", signalDbm)
         obj.put("priority", priority)
         if (videoFrameBase64 != null) obj.put("videoFrameBase64", videoFrameBase64)
+        if (hotspotSsid != null) obj.put("hotspotSsid", hotspotSsid)
+        if (hotspotPassword != null) obj.put("hotspotPassword", hotspotPassword)
+        if (hotspotRequesterPhone != null) obj.put("hotspotRequesterPhone", hotspotRequesterPhone)
         return obj.toString()
     }
 
@@ -102,7 +108,10 @@ data class MeshPacket(
                     nodeLoad = obj.optInt("nodeLoad", 0),
                     signalDbm = obj.optInt("signalDbm", 0),
                     priority = obj.optInt("priority", 1),
-                    videoFrameBase64 = if (obj.has("videoFrameBase64")) obj.getString("videoFrameBase64") else null
+                    videoFrameBase64 = if (obj.has("videoFrameBase64")) obj.getString("videoFrameBase64") else null,
+                    hotspotSsid = if (obj.has("hotspotSsid")) obj.getString("hotspotSsid") else null,
+                    hotspotPassword = if (obj.has("hotspotPassword")) obj.getString("hotspotPassword") else null,
+                    hotspotRequesterPhone = if (obj.has("hotspotRequesterPhone")) obj.getString("hotspotRequesterPhone") else null
                 )
             } catch (e: Exception) {
                 null

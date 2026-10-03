@@ -138,6 +138,33 @@ class NotificationHelper(private val context: Context) {
         notificationManager.cancel(NOTIFICATION_ID_CALLS)
     }
 
+    fun showHotspotRequestNotification(requesterPhone: String, requesterName: String) {
+        val intent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            putExtra("EXTRA_HOTSPOT_REQUEST_PHONE", requesterPhone)
+        }
+        val pendingIntent = PendingIntent.getActivity(
+            context,
+            requesterPhone.hashCode() + 5000,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val notification = NotificationCompat.Builder(context, CHANNEL_MESSAGES_ID)
+            .setSmallIcon(R.drawable.ic_app_logo)
+            .setContentTitle("Solicitud de hotspot")
+            .setContentText("$requesterName quiere conectarse a tu hotspot ChatMesh")
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setAutoCancel(true)
+            .setContentIntent(pendingIntent)
+            .build()
+
+        notificationManager.notify(
+            (requesterPhone.hashCode() and 0x7FFFFFFF) + 6000,
+            notification
+        )
+    }
+
     companion object {
         const val CHANNEL_MESSAGES_ID = "chatmesh_p2p_messages"
         const val CHANNEL_CALLS_ID = "chatmesh_p2p_calls"

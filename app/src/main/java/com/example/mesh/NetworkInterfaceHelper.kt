@@ -229,4 +229,64 @@ object NetworkInterfaceHelper {
     fun detectActiveTransport(context: Context): MeshNetworkInfo? {
         return detectActiveTransport(context, false)
     }
+
+    /**
+     * Obtiene la IP del gateway de una red conectada (útil para saber
+     * la IP del dispositivo que creó el hotspot al que estamos conectados).
+     * Lee /proc/net/route (default route Destination 00000000 en hex little-endian).
+     * Alternativa: DhcpInfo y LinkProperties.
+     */
+    fun getGatewayIp(context: Context? = null): String? {
+        try {
+            val file = java.io.File("/proc/net/route")
+            if (file.exists() && file.canRead()) {
+                val lines = file.readLines()
+                for (line in lines) {
+                    val tokens = line.trim().split(Regex("\\s+"))
+                    if (tokens.size >= 3) {
+                        val destination = tokens[1]
+                        val gatewayHex = tokens[2]
+                        if (destination == "00000000" && gatewayHex != "00000000") {
+                            val gwLong = gatewayHex.toLongOrNull(16)
+                            if (gwLong != null) {
+                                val b1 = (gwLong and 0xFF).toInt()
+                                val b2 = ((gwLong shr 8) and 0xFF).toInt()
+                                val b3 = ((gwLong shr 16) and 0xFF).toInt()
+                                val b4 = ((gwLong shr 24) and 0xFF).toInt()
+                                val ip = "$b1.$b2.$b3.$b4"
+                                if (ip != "0.0.0.0") return ip
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.d(TAG, "No se pudo leer /proc/net/route: ${e.message}")
+        }
+
+        if (context != null) {
+            try {
+                val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+                val net = cm?.activeNetwork
+                val lp = cm?.getLinkProperties(net)
+                lp?.routes?.forEach { route ->
+                    val gw = route.gateway
+                    if (gw is Inet4Address && !gw.isLoopbackAddress && gw.hostAddress != "0.0.0.0") {
+                        return gw.hostAddress
+                    }
+                }
+                val wm = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
+                @Suppress("DEPRECATION")
+                val dhcp = wm?.dhcpInfo
+                if (dhcp != null && dhcp.gateway != 0) {
+                    val g = dhcp.gateway
+                    return "${g and 0xFF}.${(g shr 8) and 0xFF}.${(g shr 16) and 0xFF}.${(g shr 24) and 0xFF}"
+                }
+            } catch (e: Exception) {
+                Log.d(TAG, "Error obteniendo gateway vía ConnectivityManager: ${e.message}")
+            }
+        }
+
+        return null
+    }
 }

@@ -79,5 +79,10 @@ class MainActivity : ComponentActivity() {
         } else if (isIncomingCall && !callerPhone.isNullOrBlank()) {
             viewModel.handleIncomingCallIntent(callerPhone, isVideo)
         }
+
+        val hotspotRequestPhone = intent.getStringExtra("EXTRA_HOTSPOT_REQUEST_PHONE")
+        if (!hotspotRequestPhone.isNullOrBlank()) {
+            viewModel.setHotspotRequestFromIntent(hotspotRequestPhone)
+        }
     }
 }

@@ -37,5 +37,9 @@ data class MeshEngineState(
     val isHotspotActive: Boolean = false,
     val hotspotSsid: String = "",
     val hotspotPassword: String = "",
-    val hotspotErrorMessage: String? = null
+    val hotspotErrorMessage: String? = null,
+    val hotspotSharedSsid: String = "",
+    val hotspotSharedPassword: String = "",
+    val isHotspotSharedByPeer: Boolean = false,
+    val hotspotPeerPhone: String = ""
 )
