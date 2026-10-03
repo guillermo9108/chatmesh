@@ -170,7 +170,9 @@ fun MainAppScreen(
                                 engineState = engineState,
                                 meshNodes = meshNodes,
                                 onScanPeers = { viewModel.startP2pDiscovery() },
-                                onConnectDevice = { device -> viewModel.connectToP2pDevice(device) }
+                                onConnectDevice = { device -> viewModel.connectToP2pDevice(device) },
+                                onStartHotspot = { viewModel.startHotspot() },
+                                onStopHotspot = { viewModel.stopHotspot() }
                             )
                             3 -> CallsTab(
                                 calls = calls,
@@ -231,6 +233,8 @@ fun MainAppScreen(
                     engineState = engineState,
                     onReCreateGroup = { viewModel.reCreateP2pGroup() },
                     onScanPeers = { viewModel.startP2pDiscovery() },
+                    onStartHotspot = { viewModel.startHotspot() },
+                    onStopHotspot = { viewModel.stopHotspot() },
                     onDismiss = { showMeshSettingsDialog = false }
                 )
             }

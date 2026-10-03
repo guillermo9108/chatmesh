@@ -325,6 +325,10 @@ class ChatMeshViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
+    fun startHotspot() = meshEngine.startHotspot()
+    fun stopHotspot() = meshEngine.stopHotspot()
+    fun clearHotspotError() = meshEngine.clearHotspotError()
+
     fun startP2pDiscovery() { meshEngine.startP2pDiscovery() }
     fun reCreateP2pGroup() { meshEngine.reCreateP2pGroup() }
     fun sendAudioMessage(base64Audio: String, durationSeconds: Int) { sendAudioVoiceMessage(base64Audio, durationSeconds) }

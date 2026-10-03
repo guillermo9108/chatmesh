@@ -76,6 +76,10 @@ class WiFiMeshEngine(
         sendVideoFrame(base64Frame)
     }
 
+    val hotspotManager = HotspotManager(context)
+    @Volatile private var currentNetworkInfo: MeshNetworkInfo? = null
+    private var networkMonitorJob: Job? = null
+
     private val _engineState = MutableStateFlow(MeshEngineState())
     val engineState: StateFlow<MeshEngineState> = _engineState.asStateFlow()
 
@@ -185,6 +189,44 @@ class WiFiMeshEngine(
         // de teléfono. El "mayor" crea grupo autónomo; el "menor" espera para
         // conectarse como cliente.
         maybeCreateAutonomousGroup()
+
+        // Monitor de conectividad y transporte de red (WiFi Direct, Hotspot, WiFi LAN)
+        startNetworkMonitorLoop()
+    }
+
+    private fun startNetworkMonitorLoop() {
+        networkMonitorJob?.cancel()
+        networkMonitorJob = scope.launch(Dispatchers.IO) {
+            while (isActive) {
+                try {
+                    val info = NetworkInterfaceHelper.detectActiveTransport(context, hotspotManager.isActive)
+                    if (info != null) {
+                        currentNetworkInfo = info
+                        if (_engineState.value.transport != info.transport ||
+                            _engineState.value.networkLocalIp != info.localIp ||
+                            _engineState.value.networkSsid != (info.ssid ?: "")
+                        ) {
+                            Log.i(TAG, "Transporte de red cambiado a: ${info.transport}, IP=${info.localIp}, SSID=${info.ssid}")
+                            _engineState.value = _engineState.value.copy(
+                                transport = info.transport,
+                                networkSsid = info.ssid ?: "",
+                                networkLocalIp = info.localIp
+                            )
+                        }
+                    } else if (_engineState.value.transport != MeshTransport.NONE) {
+                        currentNetworkInfo = null
+                        _engineState.value = _engineState.value.copy(
+                            transport = MeshTransport.NONE,
+                            networkSsid = "",
+                            networkLocalIp = ""
+                        )
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error en monitor de red", e)
+                }
+                delay(5000)
+            }
+        }
     }
 
     private fun maybeCreateAutonomousGroup() {
@@ -1012,8 +1054,20 @@ class WiFiMeshEngine(
         if (packet.packetType != "CHAT_CHUNK" && packet.packetType != "CHAT_CHUNK_END") {
             try {
                 val udp = DatagramSocket().apply { broadcast = true }
-                val targets = mutableListOf("192.168.49.255", "192.168.49.1", "255.255.255.255")
+                val info = currentNetworkInfo
+                val targets = mutableListOf<String>()
+                targets.add("255.255.255.255")
+                if (info != null && info.subnetBroadcast.isNotBlank()) {
+                    targets.add(info.subnetBroadcast)
+                }
+                // Mantener 192.168.49.255 solo si transport == WIFI_DIRECT
+                if (info?.transport == MeshTransport.WIFI_DIRECT) {
+                    targets.add("192.168.49.255")
+                    targets.add("192.168.49.1")
+                }
+                // Si destino tiene IP conocida, añadirla también
                 if (targetIp != null && !targets.contains(targetIp)) targets.add(targetIp)
+
                 for (tip in targets) {
                     try {
                         val addr = InetAddress.getByName(tip)
@@ -1302,6 +1356,17 @@ class WiFiMeshEngine(
         val clientSocketIp = activeClientSockets.keys.firstOrNull { it != "127.0.0.1" && it.isNotBlank() }
         if (!clientSocketIp.isNullOrBlank()) return clientSocketIp
 
+        val info = currentNetworkInfo
+        if (info != null) {
+            if (info.transport == MeshTransport.HOTSPOT) {
+                // Yo soy el AP (192.168.43.1), los clientes tienen .x
+                return if (info.localIp == "192.168.43.1") "192.168.43.2" else "192.168.43.1"
+            }
+            if (info.transport == MeshTransport.WIFI_LAN) {
+                // Todos estamos en la misma subred, el fallback es el gateway
+                return info.gateway ?: info.localIp
+            }
+        }
         return if (_engineState.value.isGroupOwner) "192.168.49.2" else "192.168.49.1"
     }
 
@@ -1729,6 +1794,69 @@ class WiFiMeshEngine(
         }
     }
 
+    fun startHotspot() {
+        _engineState.value = _engineState.value.copy(hotspotErrorMessage = null)
+
+        scope.launch {
+            // Liberar WifiAware si está activo (NAN y SoftAP son mutuamente excluyentes en la mayoría de los chips)
+            try {
+                publishSession?.close()
+                subscribeSession?.close()
+                awareSession?.close()
+                awareSession = null
+                _engineState.value = _engineState.value.copy(isWifiAwareActive = false)
+            } catch (_: Exception) {}
+
+            // Liberar temporalmente el grupo y detener escaneo P2P para evitar conflicto en el chip de radio Wi-Fi
+            try {
+                p2pManager?.stopPeerDiscovery(p2pChannel, null)
+                p2pManager?.removeGroup(p2pChannel, null)
+            } catch (_: Exception) {}
+
+            // Pausa breve para que el controlador de radio de Android libere la interfaz P2P / Aware
+            delay(700)
+
+            hotspotManager.start(
+                onReady = { ssid, password ->
+                    _engineState.value = _engineState.value.copy(
+                        isHotspotActive = true,
+                        hotspotSsid = ssid,
+                        hotspotPassword = password,
+                        transport = MeshTransport.HOTSPOT,
+                        hotspotErrorMessage = null
+                    )
+                    scope.launch {
+                        delay(3000)
+                        sendHeartbeatAndBeacon()
+                    }
+                },
+                onError = { msg ->
+                    Log.e(TAG, "Error hotspot: $msg")
+                    _engineState.value = _engineState.value.copy(
+                        isHotspotActive = false,
+                        hotspotSsid = "",
+                        hotspotPassword = "",
+                        hotspotErrorMessage = msg
+                    )
+                }
+            )
+        }
+    }
+
+    fun stopHotspot() {
+        hotspotManager.stop()
+        _engineState.value = _engineState.value.copy(
+            isHotspotActive = false,
+            hotspotSsid = "",
+            hotspotPassword = "",
+            hotspotErrorMessage = null
+        )
+    }
+
+    fun clearHotspotError() {
+        _engineState.value = _engineState.value.copy(hotspotErrorMessage = null)
+    }
+
     fun cleanUp() {
         try {
             audioRecordJob?.cancel()
@@ -1747,6 +1875,7 @@ class WiFiMeshEngine(
             socketWriters.clear()
             socketMutexes.clear()
             p2pManager?.removeGroup(p2pChannel, null)
+            hotspotManager.stop()
             isInitialized = false
         } catch (_: Exception) {}
     }

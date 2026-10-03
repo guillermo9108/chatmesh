@@ -66,6 +66,17 @@ fun WhatsAppTopBar(
             ),
             actions = {
                 IconButton(
+                    onClick = onMeshSettingsClick,
+                    modifier = Modifier.testTag("network_mode_button")
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Router,
+                        contentDescription = "Red WiFi LAN / Hotspot",
+                        tint = Color.White
+                    )
+                }
+
+                IconButton(
                     onClick = onSearchClick,
                     modifier = Modifier.testTag("search_button")
                 ) {
@@ -117,8 +128,24 @@ fun WhatsAppTopBar(
                             }
                         )
                         DropdownMenuItem(
-                            text = { Text("Ajustes de Malla P2P") },
-                            leadingIcon = { Icon(Icons.Default.Wifi, contentDescription = null) },
+                            text = { Text("Red WiFi LAN (Router)") },
+                            leadingIcon = { Icon(Icons.Default.Router, contentDescription = null, tint = WhatsAppTeal) },
+                            onClick = {
+                                menuExpanded = false
+                                onMeshSettingsClick()
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Punto de Acceso (Hotspot)") },
+                            leadingIcon = { Icon(Icons.Default.WifiTethering, contentDescription = null, tint = WhatsAppTeal) },
+                            onClick = {
+                                menuExpanded = false
+                                onMeshSettingsClick()
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Ajustes WiFi Direct (P2P)") },
+                            leadingIcon = { Icon(Icons.Default.Wifi, contentDescription = null, tint = WhatsAppTeal) },
                             onClick = {
                                 menuExpanded = false
                                 onMeshSettingsClick()

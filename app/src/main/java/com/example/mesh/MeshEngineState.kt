@@ -31,5 +31,12 @@ data class MeshEngineState(
     val activeRecordingContactPhone: String? = null,
     val discoveredP2pDevices: List<WifiP2pDevice> = emptyList(),
     val optimalNodeName: String = "",
-    val autoConnectStatus: String = "Modo Autónomo Activo"
+    val autoConnectStatus: String = "Modo Autónomo Activo",
+    val transport: MeshTransport = MeshTransport.NONE,
+    val networkSsid: String = "",
+    val networkLocalIp: String = "",
+    val isHotspotActive: Boolean = false,
+    val hotspotSsid: String = "",
+    val hotspotPassword: String = "",
+    val hotspotErrorMessage: String? = null
 )
