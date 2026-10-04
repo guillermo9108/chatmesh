@@ -15,11 +15,14 @@ import com.example.ui.theme.WhatsAppTeal
 
 @Composable
 fun AddContactDialog(
+    initialName: String = "",
+    initialPhone: String = "",
     onAddContact: (String, String) -> Unit,
     onDismiss: () -> Unit
 ) {
-    var name by remember { mutableStateOf("") }
-    var phone by remember { mutableStateOf("") }
+    var name by remember { mutableStateOf(initialName) }
+    var phone by remember { mutableStateOf(initialPhone) }
+    var errorMsg by remember { mutableStateOf<String?>(null) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -44,22 +47,37 @@ fun AddContactDialog(
                 Spacer(modifier = Modifier.height(8.dp))
                 OutlinedTextField(
                     value = phone,
-                    onValueChange = { phone = it },
+                    onValueChange = {
+                        phone = it
+                        errorMsg = null
+                    },
                     label = { Text("Número de teléfono (ej. +53...)") },
                     singleLine = true,
+                    isError = errorMsg != null,
                     modifier = Modifier
                         .fillMaxWidth()
                         .testTag("contact_phone_input")
                 )
+                if (errorMsg != null) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = errorMsg ?: "",
+                        color = MaterialTheme.colorScheme.error,
+                        fontSize = 12.sp
+                    )
+                }
             }
         },
         confirmButton = {
             Button(
                 onClick = {
-                    if (phone.isNotBlank()) {
-                        onAddContact(name.ifBlank { phone }, phone)
-                        onDismiss()
+                    val clean = com.example.mesh.SimDetectionUtil.sanitizePhoneNumber(phone)
+                    if (!com.example.mesh.SimDetectionUtil.isValidPhoneNumber(clean)) {
+                        errorMsg = "Por favor ingresa un número de teléfono válido (no ceros ni dummy)"
+                        return@Button
                     }
+                    onAddContact(name.ifBlank { clean }, clean)
+                    onDismiss()
                 },
                 colors = ButtonDefaults.buttonColors(containerColor = WhatsAppTeal),
                 modifier = Modifier.testTag("save_contact_button")

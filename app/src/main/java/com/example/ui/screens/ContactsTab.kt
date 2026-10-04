@@ -203,30 +203,32 @@ fun ContactItemRow(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 12.dp),
+            .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         UserAvatar(
             avatarUri = contact.avatarUri,
             displayName = contact.displayName.ifBlank { contact.phoneNumber },
-            size = 48.dp
+            size = 42.dp
         )
 
-        Spacer(modifier = Modifier.width(16.dp))
+        Spacer(modifier = Modifier.width(12.dp))
 
         Column(modifier = Modifier.weight(1f)) {
             Text(
-                text = contact.displayName.ifBlank { contact.phoneNumber },
+                text = contact.displayName.ifBlank { "Contacto" },
                 fontWeight = FontWeight.SemiBold,
-                fontSize = 16.sp,
+                fontSize = 15.sp,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
             Spacer(modifier = Modifier.height(2.dp))
             Text(
                 text = contact.phoneNumber,
-                fontSize = 13.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
         }
 

@@ -44,4 +44,7 @@ interface ContactDao {
 
     @Query("UPDATE contacts SET unreadCount = unreadCount + 1 WHERE phoneNumber = :phone")
     suspend fun incrementUnread(phone: String)
+
+    @Query("DELETE FROM contacts WHERE phoneNumber LIKE '%000000%' OR phoneNumber = '+530000000' OR phoneNumber = '530000000' OR phoneNumber LIKE '%:%' OR length(phoneNumber) < 7")
+    suspend fun deleteInvalidContacts()
 }

@@ -36,7 +36,9 @@ import androidx.compose.ui.unit.sp
 import com.example.R
 import com.example.data.entity.ContactEntity
 import com.example.data.entity.MessageEntity
+import com.example.ui.components.AddContactDialog
 import com.example.ui.components.ChatBubble
+import androidx.compose.ui.text.style.TextOverflow
 import com.example.ui.theme.WhatsAppChatBgLight
 import com.example.ui.theme.WhatsAppGreenAccent
 import com.example.ui.theme.WhatsAppTeal
@@ -59,6 +61,7 @@ fun ChatDetailScreen(
     onAudioCallClick: () -> Unit,
     onVideoCallClick: () -> Unit,
     onTypingChange: (String) -> Unit,
+    onSaveContact: (String, String) -> Unit = { _, _ -> },
     modifier: Modifier = Modifier
 ) {
     BackHandler { onBackClick() }
@@ -69,6 +72,11 @@ fun ChatDetailScreen(
     var menuExpanded by remember { mutableStateOf(false) }
     var isRecording by remember { mutableStateOf(false) }
     var recordingSeconds by remember { mutableIntStateOf(0) }
+    var showAddContactDialog by remember { mutableStateOf(false) }
+
+    val isContactSaved = contact.displayName.isNotBlank() &&
+        contact.displayName != contact.phoneNumber &&
+        !contact.displayName.startsWith("+")
 
     val listState = rememberLazyListState()
 
@@ -138,16 +146,17 @@ fun ChatDetailScreen(
                         UserAvatar(
                             avatarUri = contact.avatarUri,
                             displayName = contact.displayName.ifBlank { contact.phoneNumber },
-                            size = 38.dp
+                            size = 36.dp
                         )
-                        Spacer(modifier = Modifier.width(10.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = contact.displayName.ifBlank { contact.phoneNumber },
+                                text = contact.displayName.ifBlank { "Contacto" },
                                 color = Color.White,
-                                fontSize = 17.sp,
+                                fontSize = 15.sp,
                                 fontWeight = FontWeight.Bold,
-                                maxLines = 1
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                             val subtext = when {
                                 activeTypingPhone == contact.phoneNumber -> "Escribiendo..."
@@ -156,14 +165,15 @@ fun ChatDetailScreen(
                                 else -> "Desconectado"
                             }
                             Text(
-                                text = subtext,
+                                text = "${contact.phoneNumber} • $subtext",
                                 color = if (activeTypingPhone == contact.phoneNumber || activeRecordingPhone == contact.phoneNumber) {
                                     WhatsAppGreenAccent
                                 } else {
-                                    Color.White.copy(alpha = 0.8f)
+                                    Color.White.copy(alpha = 0.85f)
                                 },
-                                fontSize = 12.sp,
-                                maxLines = 1
+                                fontSize = 11.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
                     }
@@ -213,11 +223,16 @@ fun ChatDetailScreen(
                         onDismissRequest = { menuExpanded = false }
                     ) {
                         DropdownMenuItem(
-                            text = { Text("Ver contacto") },
-                            onClick = { menuExpanded = false }
+                            text = { Text(if (!isContactSaved) "Guardar en Contactos" else "Editar Nombre") },
+                            leadingIcon = { Icon(Icons.Default.PersonAdd, contentDescription = null, tint = WhatsAppTeal) },
+                            onClick = {
+                                menuExpanded = false
+                                showAddContactDialog = true
+                            }
                         )
                         DropdownMenuItem(
-                            text = { Text("Vaciar chat") },
+                            text = { Text("Ver detalles") },
+                            leadingIcon = { Icon(Icons.Default.Info, contentDescription = null) },
                             onClick = { menuExpanded = false }
                         )
                     }
@@ -252,6 +267,47 @@ fun ChatDetailScreen(
             )
 
             Column(modifier = Modifier.fillMaxSize()) {
+                // Banner para números no guardados
+                if (!isContactSaved) {
+                    Surface(
+                        color = Color.White.copy(alpha = 0.95f),
+                        shadowElevation = 2.dp,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Número no guardado en contactos",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = WhatsAppTeal
+                                )
+                                Text(
+                                    text = contact.phoneNumber,
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            Button(
+                                onClick = { showAddContactDialog = true },
+                                colors = ButtonDefaults.buttonColors(containerColor = WhatsAppTeal),
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                modifier = Modifier.testTag("add_contact_chat_banner_btn")
+                            ) {
+                                Icon(Icons.Default.PersonAdd, contentDescription = null, modifier = Modifier.size(14.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Agregar", fontSize = 12.sp)
+                            }
+                        }
+                    }
+                }
+
                 // Messages List
                 LazyColumn(
                     state = listState,
@@ -476,6 +532,18 @@ fun ChatDetailScreen(
                     }
                 }
             }
+        }
+
+        if (showAddContactDialog) {
+            AddContactDialog(
+                initialName = if (contact.displayName != contact.phoneNumber) contact.displayName else "",
+                initialPhone = contact.phoneNumber,
+                onAddContact = { name, phone ->
+                    onSaveContact(name, phone)
+                    showAddContactDialog = false
+                },
+                onDismiss = { showAddContactDialog = false }
+            )
         }
     }
 }

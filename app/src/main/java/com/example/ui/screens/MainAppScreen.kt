@@ -1,6 +1,8 @@
 package com.example.ui.screens
 
 import android.Manifest
+import android.content.Context
+import android.content.Intent
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -9,11 +11,13 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.ui.components.AddContactDialog
 import com.example.ui.components.GitHubInfoDialog
 import com.example.ui.components.MeshSettingsDialog
 import com.example.ui.components.SimConfigDialog
+import com.example.ui.components.VideoQualityDialog
 import com.example.ui.components.WhatsAppTopBar
 import com.example.ui.viewmodel.ChatMeshViewModel
 
@@ -40,16 +44,24 @@ fun MainAppScreen(
     val registrationError by viewModel.registrationError.collectAsStateWithLifecycle()
     val detectedPhoneForPrefill by viewModel.detectedPhoneForPrefill.collectAsStateWithLifecycle()
 
+    val context = LocalContext.current
+    val videoQuality by viewModel.videoQuality.collectAsStateWithLifecycle()
+
     var selectedTabIndex by remember { mutableIntStateOf(0) }
     var showProfileDialog by remember { mutableStateOf(false) }
     var showSimConfigDialog by remember { mutableStateOf(false) }
     var showAddContactDialog by remember { mutableStateOf(false) }
     var showGitHubDialog by remember { mutableStateOf(false) }
     var showMeshSettingsDialog by remember { mutableStateOf(false) }
+    var showVideoQualityDialog by remember { mutableStateOf(false) }
 
     val hotspotRequestFromPeer by viewModel.hotspotRequestFromPeer.collectAsStateWithLifecycle()
     val hotspotSharedFromPeer by viewModel.hotspotSharedFromPeer.collectAsStateWithLifecycle()
     val hotspotConnectionStatus by viewModel.hotspotConnectionStatus.collectAsStateWithLifecycle()
+
+    val blePeersPhones by viewModel.blePeersPhones.collectAsStateWithLifecycle()
+    val bleEnabled by viewModel.bleEnabled.collectAsStateWithLifecycle()
+    val isBleNegotiatingGo by viewModel.isBleNegotiatingGo.collectAsStateWithLifecycle()
 
     LaunchedEffect(hotspotRequestFromPeer) {
         if (hotspotRequestFromPeer != null) {
@@ -81,6 +93,11 @@ fun MainAppScreen(
             Manifest.permission.READ_PHONE_STATE,
             Manifest.permission.READ_PHONE_NUMBERS
         )
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            permissions.add(Manifest.permission.BLUETOOTH_SCAN)
+            permissions.add(Manifest.permission.BLUETOOTH_ADVERTISE)
+            permissions.add(Manifest.permission.BLUETOOTH_CONNECT)
+        }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             permissions.add(Manifest.permission.NEARBY_WIFI_DEVICES)
             permissions.add(Manifest.permission.POST_NOTIFICATIONS)
@@ -143,6 +160,9 @@ fun MainAppScreen(
                     onVideoCallClick = { viewModel.startVideoCall(selectedContact!!) },
                     onTypingChange = { status ->
                         viewModel.sendUserStatus(status)
+                    },
+                    onSaveContact = { name, phone ->
+                        viewModel.addNewManualContact(name, phone)
                     }
                 )
             }
@@ -164,6 +184,9 @@ fun MainAppScreen(
                         onSimConfigClick = { showSimConfigDialog = true },
                         onMeshSettingsClick = { showMeshSettingsDialog = true },
                         onGitHubClick = { showGitHubDialog = true },
+                        onVideoQualityClick = { showVideoQualityDialog = true },
+                        onShareAppClick = { shareApp(context) },
+                        currentVideoQuality = videoQuality,
                         unreadChatsCount = chatContacts.sumOf { it.unreadCount },
                         connectedNodesCount = engineState.connectedPeersCount,
                         ssidName = engineState.ssid
@@ -260,9 +283,33 @@ fun MainAppScreen(
                     onDismissHotspotRequest = { viewModel.dismissHotspotRequest() },
                     onDismissHotspotShared = { viewModel.dismissHotspotSharedFromPeer() },
                     availablePeerPhones = viewModel.getKnownPeerPhones(),
+                    myBleScore = viewModel.getMyBleScore(),
+                    blePeersPhones = blePeersPhones,
+                    bleEnabled = bleEnabled,
+                    isBleNegotiatingGo = isBleNegotiatingGo,
                     onDismiss = { showMeshSettingsDialog = false }
+                )
+            }
+
+            if (showVideoQualityDialog) {
+                VideoQualityDialog(
+                    currentQuality = videoQuality,
+                    onQualitySelected = { q -> viewModel.setVideoQuality(q) },
+                    onDismiss = { showVideoQualityDialog = false }
                 )
             }
         }
     }
+}
+
+private fun shareApp(context: Context) {
+    try {
+        val shareText = "¡Descarga y conéctate sin Internet con ChatMesh! Mensajería P2P, llamadas de voz y video en malla offline por WiFi Direct, Hotspot y Bluetooth LE."
+        val intent = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_SUBJECT, "ChatMesh - Mensajería P2P Offline")
+            putExtra(Intent.EXTRA_TEXT, shareText)
+        }
+        context.startActivity(Intent.createChooser(intent, "Compartir ChatMesh"))
+    } catch (_: Exception) {}
 }

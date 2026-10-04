@@ -20,13 +20,25 @@ class P2pVideoCallManager(
 ) {
     companion object {
         private const val TAG = "P2pVideoCallManager"
-
-        private const val FRAME_WIDTH = 160
-        private const val FRAME_HEIGHT = 120
-        private const val MAX_FRAME_SIZE = 1350
-        private const val JPEG_QUALITY = 30
-        private const val FRAME_INTERVAL_MS = 125L // Máximo 8 FPS
     }
+
+    private var currentQuality: VideoQuality = VideoQuality.MEDIUM
+
+    fun setVideoQuality(quality: VideoQuality) {
+        if (currentQuality == quality) return
+        currentQuality = quality
+        Log.i(TAG, "Calidad de video cambiada a: ${quality.title} (${quality.width}x${quality.height})")
+        if (isStreamingActive) {
+            try {
+                captureSession?.close()
+                cameraDevice?.close()
+                imageReader?.close()
+            } catch (_: Exception) {}
+            startCameraCapture()
+        }
+    }
+
+    fun getVideoQuality(): VideoQuality = currentQuality
 
     private val _localVideoBitmap = MutableStateFlow<Bitmap?>(null)
     val localVideoBitmap: StateFlow<Bitmap?> = _localVideoBitmap.asStateFlow()
@@ -120,7 +132,9 @@ class P2pVideoCallManager(
             val cameraId = findCameraId(cameraManager, isFrontFacing)
                 ?: cameraManager.cameraIdList.firstOrNull() ?: return
 
-            imageReader = ImageReader.newInstance(FRAME_WIDTH, FRAME_HEIGHT, ImageFormat.JPEG, 2)
+            val targetW = currentQuality.width
+            val targetH = currentQuality.height
+            imageReader = ImageReader.newInstance(targetW, targetH, ImageFormat.JPEG, 2)
             imageReader?.setOnImageAvailableListener({ reader ->
                 if (!isStreamingActive) return@setOnImageAvailableListener
                 try {
@@ -131,9 +145,9 @@ class P2pVideoCallManager(
                         return@setOnImageAvailableListener
                     }
 
-                    // Limitar a máximo 8 FPS (intervalo >= 125ms)
+                    // Limitar según intervalo de FPS configurado
                     val now = System.currentTimeMillis()
-                    if (now - lastFrameTimestamp < FRAME_INTERVAL_MS) {
+                    if (now - lastFrameTimestamp < currentQuality.frameIntervalMs) {
                         image.close()
                         return@setOnImageAvailableListener
                     }
@@ -179,7 +193,8 @@ class P2pVideoCallManager(
     }
 
     private fun encodeFrame(bitmap: Bitmap): ByteArray? {
-        var quality = JPEG_QUALITY
+        var quality = currentQuality.jpegQuality
+        val maxBytes = currentQuality.maxFrameSize
         var working = bitmap
         var width = bitmap.width
         var height = bitmap.height
@@ -188,18 +203,18 @@ class P2pVideoCallManager(
             val out = ByteArrayOutputStream()
             working.compress(Bitmap.CompressFormat.JPEG, quality, out)
             val bytes = out.toByteArray()
-            if (bytes.size <= MAX_FRAME_SIZE) {
+            if (bytes.size <= maxBytes) {
                 if (attempt > 0) {
                     Log.d(TAG, "Frame ajustado intento $attempt: ${bytes.size} bytes, ${width}x$height, q=$quality")
                 }
                 return bytes
             }
-            quality = (quality - 8).coerceAtLeast(12)
-            width = (width * 0.85f).toInt().coerceAtLeast(80)
-            height = (height * 0.85f).toInt().coerceAtLeast(60)
+            quality = (quality - 8).coerceAtLeast(10)
+            width = (width * 0.85f).toInt().coerceAtLeast(60)
+            height = (height * 0.85f).toInt().coerceAtLeast(45)
             working = Bitmap.createScaledBitmap(working, width, height, true)
         }
-        Log.w(TAG, "Frame descartado por superar $MAX_FRAME_SIZE bytes")
+        Log.w(TAG, "Frame descartado por superar $maxBytes bytes")
         return null
     }
 

@@ -37,7 +37,7 @@ object ContactSyncUtil {
                     val rawNumber = if (numberIndex >= 0) it.getString(numberIndex) else null
                     if (!rawNumber.isNullOrBlank()) {
                         val sanitized = SimDetectionUtil.sanitizePhoneNumber(rawNumber)
-                        if (sanitized != myPhoneNumber && seenNumbers.add(sanitized)) {
+                        if (SimDetectionUtil.isValidPhoneNumber(sanitized) && sanitized != myPhoneNumber && seenNumbers.add(sanitized)) {
                             val name = if (nameIndex >= 0) it.getString(nameIndex) ?: sanitized else sanitized
                             val photo = if (photoIndex >= 0) it.getString(photoIndex) else null
                             contactsToInsert.add(

@@ -41,5 +41,9 @@ data class MeshEngineState(
     val hotspotSharedSsid: String = "",
     val hotspotSharedPassword: String = "",
     val isHotspotSharedByPeer: Boolean = false,
-    val hotspotPeerPhone: String = ""
+    val hotspotPeerPhone: String = "",
+    val bleEnabled: Boolean = false,
+    val blePeersCount: Int = 0,
+    val blePeersPhones: List<String> = emptyList(),
+    val isBleNegotiatingGo: Boolean = false
 )

@@ -76,6 +76,7 @@ class WiFiMeshEngine(
     @Volatile private var currentNetworkInfo: MeshNetworkInfo? = null
     private var networkMonitorJob: Job? = null
     private var multicastLock: WifiManager.MulticastLock? = null
+    private var bleDiscovery: BleDiscoveryService? = null
 
     private val _engineState = MutableStateFlow(MeshEngineState())
     val engineState: StateFlow<MeshEngineState> = _engineState.asStateFlow()
@@ -94,6 +95,52 @@ class WiFiMeshEngine(
     private val socketMutexes = ConcurrentHashMap<Socket, Mutex>()
     private val peerIpByPhone = ConcurrentHashMap<String, String>()
     private val peerMetrics = ConcurrentHashMap<String, PeerMetric>()
+
+    data class KnownNeighborNode(
+        val nodeId: String,
+        val phoneNumber: String,
+        val displayName: String,
+        val lastIp: String? = null,
+        val lastSeenTimestamp: Long = System.currentTimeMillis(),
+        val isHotspotOwner: Boolean = false,
+        val hotspotSsid: String? = null,
+        val hotspotPassword: String? = null
+    )
+
+    private val knownNeighborPeers = ConcurrentHashMap<String, KnownNeighborNode>()
+    private var videoQuality = VideoQuality.MEDIUM
+
+    fun recordKnownNeighbor(
+        nodeId: String,
+        phone: String,
+        name: String,
+        ip: String? = null,
+        isHotspot: Boolean = false,
+        hotspotSsid: String? = null,
+        hotspotPassword: String? = null
+    ) {
+        if (!SimDetectionUtil.isValidPhoneNumber(phone)) return
+        val existing = knownNeighborPeers[phone]
+        knownNeighborPeers[phone] = KnownNeighborNode(
+            nodeId = nodeId.ifBlank { existing?.nodeId ?: "" },
+            phoneNumber = phone,
+            displayName = if (name.isNotBlank() && name != phone) name else (existing?.displayName ?: phone),
+            lastIp = ip ?: existing?.lastIp,
+            lastSeenTimestamp = System.currentTimeMillis(),
+            isHotspotOwner = isHotspot || (existing?.isHotspotOwner == true),
+            hotspotSsid = hotspotSsid ?: existing?.hotspotSsid,
+            hotspotPassword = hotspotPassword ?: existing?.hotspotPassword
+        )
+    }
+
+    fun getKnownNeighborPeers(): List<KnownNeighborNode> = knownNeighborPeers.values.toList()
+
+    fun setVideoQuality(quality: VideoQuality) {
+        videoQuality = quality
+        videoCallManager.setVideoQuality(quality)
+    }
+
+    fun getVideoQuality(): VideoQuality = videoQuality
 
     private val storeAndForwardQueue = ConcurrentHashMap<String, PendingRetry>()
     private val receivedPacketUuids = ConcurrentHashMap.newKeySet<String>()
@@ -192,6 +239,39 @@ class WiFiMeshEngine(
 
         // Monitor de conectividad y transporte de red (WiFi Direct, Hotspot, WiFi LAN)
         startNetworkMonitorLoop()
+
+        // Iniciar descubrimiento BLE (si los permisos están concedidos)
+        try {
+            bleDiscovery = BleDiscoveryService(
+                context = context,
+                myProfileProvider = { buildMyBleProfile() },
+                onPeerDiscovered = { peer, rssi ->
+                    Log.i(TAG, "BLE peer: ${peer.nickname} score=${peer.score}")
+                    val peers = bleDiscovery?.getDiscoveredPeers() ?: emptyList()
+                    _engineState.value = _engineState.value.copy(
+                        bleEnabled = true,
+                        blePeersCount = peers.size,
+                        blePeersPhones = peers.map { it.phoneNumber }
+                    )
+                },
+                onPeerLost = { phone ->
+                    val peers = bleDiscovery?.getDiscoveredPeers() ?: emptyList()
+                    _engineState.value = _engineState.value.copy(
+                        blePeersCount = peers.size,
+                        blePeersPhones = peers.map { it.phoneNumber }
+                    )
+                },
+                onShouldBecomeGo = {
+                    onShouldBecomeGoFromBle()
+                }
+            )
+            bleDiscovery?.start()
+            _engineState.value = _engineState.value.copy(
+                bleEnabled = bleDiscovery?.isSupported() == true
+            )
+        } catch (e: Exception) {
+            Log.e(TAG, "Error iniciando BLE discovery", e)
+        }
     }
 
     private fun startNetworkMonitorLoop() {
@@ -260,6 +340,100 @@ class WiFiMeshEngine(
                 Log.e(TAG, "Error creando grupo autónomo inicial", e)
             }
         }
+    }
+
+    /**
+     * Monitoreo y auto-restablecimiento del canal de malla (WiFi Direct / Hotspot / LAN).
+     * Ejecutado continuamente por MeshForegroundService y por el monitor de red.
+     */
+    fun checkAndRecoverMeshConnection(): String {
+        val state = _engineState.value
+        val hasActiveTransport = state.transport != MeshTransport.NONE
+        val hasActiveSockets = activeClientSockets.isNotEmpty()
+        val isHotspotActive = hotspotManager.isActive || state.isHotspotActive
+        val hasConnectedPeers = state.connectedPeersCount > 0
+
+        // Si la conexión está viva y saludable
+        if (hasActiveTransport && (hasActiveSockets || isHotspotActive || state.isGroupOwner || hasConnectedPeers)) {
+            val peerCount = activeClientSockets.size.coerceAtLeast(state.connectedPeersCount)
+            val modeName = when (state.transport) {
+                MeshTransport.WIFI_DIRECT -> "WiFi Direct"
+                MeshTransport.WIFI_LAN -> "WiFi LAN"
+                MeshTransport.HOTSPOT -> "Hotspot Móvil"
+                else -> "Malla P2P"
+            }
+            // Enviar beacon de mantenimiento periódico
+            sendHeartbeatAndBeacon()
+            return "ChatMesh: Activo en $modeName ($peerCount pares conectados)"
+        }
+
+        // --- DESCONEXIÓN DETECTADA: RESTABLECIMIENTO AUTOMÁTICO ---
+        Log.w(TAG, "Watchdog: Canal de malla desconectado. Iniciando restablecimiento automático con nodos vecinos conocidos...")
+
+        scope.launch {
+            // 1. Si teníamos credenciales guardadas de un Hotspot de un peer, intentar reconectar
+            val sharedSsid = state.hotspotSharedSsid.ifBlank {
+                context.getSharedPreferences("chatmesh_prefs", Context.MODE_PRIVATE)
+                    .getString("pending_hotspot_ssid", "") ?: ""
+            }
+            val sharedPass = state.hotspotSharedPassword.ifBlank {
+                context.getSharedPreferences("chatmesh_prefs", Context.MODE_PRIVATE)
+                    .getString("pending_hotspot_password", "") ?: ""
+            }
+            if (sharedSsid.isNotBlank() && sharedPass.isNotBlank() && HotspotConnector.isSupported()) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    try {
+                        HotspotConnector.connectToHotspot(
+                            context = context,
+                            ssid = sharedSsid,
+                            password = sharedPass,
+                            onConnected = {
+                                Log.i(TAG, "Reconectado exitosamente a hotspot de peer: $sharedSsid")
+                            },
+                            onFailed = {
+                                Log.w(TAG, "Fallo reconectando a hotspot conocido: $it")
+                            }
+                        )
+                    } catch (_: Exception) {}
+                }
+            }
+
+            // 2. Reiniciar escaneo y descubrimiento de pares WiFi Direct
+            startP2pDiscovery()
+
+            // 3. Evaluar y reconectar al mejor nodo si hay pares descubiertos
+            evaluateAndAutoConnectToBestNode()
+
+            // 4. Reintentar conexión con nodos vecinos conocidos recientemente registrados
+            if (knownNeighborPeers.isNotEmpty()) {
+                for ((phone, neighbor) in knownNeighborPeers) {
+                    val targetIp = neighbor.lastIp ?: peerIpByPhone[phone]
+                    if (targetIp != null && targetIp != "127.0.0.1") {
+                        try {
+                            val probe = MeshPacket(
+                                packetType = "BEACON",
+                                sourceNodeId = _engineState.value.myNodeId,
+                                sourcePhone = _engineState.value.myPhoneNumber,
+                                sourceName = _engineState.value.myNickname,
+                                destinationPhone = phone
+                            )
+                            transmitMeshPacketSync(probe)
+                        } catch (_: Exception) {}
+                    }
+                }
+            }
+
+            // 5. Si después de unos segundos seguimos desconectados y sin grupo, evaluar grupo autónomo
+            delay(4000)
+            if (_engineState.value.transport == MeshTransport.NONE &&
+                !_engineState.value.isGroupOwner &&
+                _engineState.value.discoveredP2pDevices.isEmpty()
+            ) {
+                maybeCreateAutonomousGroup()
+            }
+        }
+
+        return "ChatMesh: Restableciendo canal y reconectando a nodos..."
     }
 
     fun updateUserProfile(myPhone: String, myNickname: String, myAvatarUri: String?) {
@@ -589,36 +763,29 @@ class WiFiMeshEngine(
         }
 
         scope.launch {
-            if (phoneFromSsid != null) {
+            val cleanPhone = phoneFromSsid?.let { SimDetectionUtil.sanitizePhoneNumber(it) }
+            if (cleanPhone != null && SimDetectionUtil.isValidPhoneNumber(cleanPhone)) {
                 if (!_engineState.value.isGroupOwner) {
-                    peerIpByPhone[phoneFromSsid] = "192.168.49.1"
+                    peerIpByPhone[cleanPhone] = "192.168.49.1"
                 }
-                val contact = repository.getContact(phoneFromSsid)
+                recordKnownNeighbor(
+                    nodeId = device.deviceAddress,
+                    phone = cleanPhone,
+                    name = devName,
+                    ip = if (!_engineState.value.isGroupOwner) "192.168.49.1" else null
+                )
+                val contact = repository.getContact(cleanPhone)
                 if (contact == null) {
                     repository.insertContact(
                         ContactEntity(
-                            phoneNumber = phoneFromSsid,
+                            phoneNumber = cleanPhone,
                             displayName = devName,
                             isRegisteredInMesh = true,
                             isConnected = isConnected
                         )
                     )
                 } else {
-                    repository.updateConnectionStatus(phoneFromSsid, isConnected, System.currentTimeMillis())
-                }
-            } else {
-                val contact = repository.getContact(device.deviceAddress)
-                if (contact == null) {
-                    repository.insertContact(
-                        ContactEntity(
-                            phoneNumber = device.deviceAddress,
-                            displayName = devName.ifBlank { "Dispositivo WiFi Direct" },
-                            isRegisteredInMesh = true,
-                            isConnected = isConnected
-                        )
-                    )
-                } else {
-                    repository.updateConnectionStatus(device.deviceAddress, isConnected, System.currentTimeMillis())
+                    repository.updateConnectionStatus(cleanPhone, isConnected, System.currentTimeMillis())
                 }
             }
         }
@@ -1967,8 +2134,103 @@ class WiFiMeshEngine(
         return list
     }
 
+    private fun buildMyBleProfile(): BleDeviceProfile {
+        val battery = getBatteryInfo()
+        val hasInternet = hasInternetConnection()
+        return BleDeviceProfile(
+            nodeId = _engineState.value.myNodeId,
+            phoneNumber = _engineState.value.myPhoneNumber,
+            nickname = _engineState.value.myNickname,
+            batteryPercent = battery.first,
+            isCharging = battery.second,
+            hasInternet = hasInternet,
+            androidSdk = Build.VERSION.SDK_INT,
+            score = BleScoreCalculator.calculate(
+                batteryPercent = battery.first,
+                isCharging = battery.second,
+                hasInternet = hasInternet,
+                androidSdk = Build.VERSION.SDK_INT
+            )
+        )
+    }
+
+    private fun getBatteryInfo(): Pair<Int, Boolean> {
+        return try {
+            val bm = context.getSystemService(Context.BATTERY_SERVICE) as? android.os.BatteryManager
+            val level = bm?.getIntProperty(android.os.BatteryManager.BATTERY_PROPERTY_CAPACITY) ?: -1
+            val status = bm?.getIntProperty(android.os.BatteryManager.BATTERY_PROPERTY_STATUS) ?: -1
+            val charging = status == android.os.BatteryManager.BATTERY_STATUS_CHARGING ||
+                           status == android.os.BatteryManager.BATTERY_STATUS_FULL
+            Pair(if (level in 0..100) level else -1, charging)
+        } catch (_: Exception) { Pair(-1, false) }
+    }
+
+    private fun hasInternetConnection(): Boolean {
+        return try {
+            val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? android.net.ConnectivityManager
+            val network = cm?.activeNetwork ?: return false
+            val caps = cm.getNetworkCapabilities(network) ?: return false
+            caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+                caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+        } catch (_: Exception) { false }
+    }
+
+    private fun onShouldBecomeGoFromBle() {
+        if (_engineState.value.isGroupOwner) return
+        if (activeClientSockets.isNotEmpty()) return
+
+        // Si ya estamos conectados en WiFi LAN o Hotspot, no interferir con la conexión actual
+        if (currentNetworkInfo?.transport == MeshTransport.WIFI_LAN ||
+            currentNetworkInfo?.transport == MeshTransport.HOTSPOT ||
+            hotspotManager.isActive
+        ) return
+
+        _engineState.value = _engineState.value.copy(isBleNegotiatingGo = true)
+
+        scope.launch {
+            try {
+                delay(1500) // Pausa para mitigar condiciones de carrera entre dispositivos
+
+                val myProfile = buildMyBleProfile()
+                val peers = bleDiscovery?.getDiscoveredPeers() ?: emptyList()
+                val amStillBest = peers.none {
+                    it.phoneNumber != myProfile.phoneNumber &&
+                    (it.score > myProfile.score ||
+                     (it.score == myProfile.score && it.phoneNumber < myProfile.phoneNumber))
+                }
+
+                if (!amStillBest) {
+                    Log.i(TAG, "Otro nodo tiene mejor score o menor teléfono, esperando rol de cliente")
+                    _engineState.value = _engineState.value.copy(isBleNegotiatingGo = false)
+                    return@launch
+                }
+
+                Log.i(TAG, "Soy el mejor candidato por BLE (score=${myProfile.score}). Autoproclamando Group Owner.")
+                val ch = p2pChannel ?: run {
+                    _engineState.value = _engineState.value.copy(isBleNegotiatingGo = false)
+                    return@launch
+                }
+
+                p2pManager?.requestGroupInfo(ch) { group ->
+                    if (group != null && group.isGroupOwner) {
+                        Log.i(TAG, "Ya somos Group Owner, omitiendo recreación")
+                        _engineState.value = _engineState.value.copy(isBleNegotiatingGo = false)
+                        return@requestGroupInfo
+                    }
+                    createAutonomousP2pGroup(_engineState.value.ssid)
+                    _engineState.value = _engineState.value.copy(isBleNegotiatingGo = false)
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error en negociación BLE → GO", e)
+                _engineState.value = _engineState.value.copy(isBleNegotiatingGo = false)
+            }
+        }
+    }
+
     fun cleanUp() {
         try {
+            try { bleDiscovery?.cleanup() } catch (_: Exception) {}
+            bleDiscovery = null
             audioRecordJob?.cancel()
             audioPlayJob?.cancel()
             meshMaintenanceJob?.cancel()

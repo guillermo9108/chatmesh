@@ -73,14 +73,37 @@ object SimDetectionUtil {
         return null
     }
 
-    /** Verifica que el número parezca real (no vacío, no todo ceros, etc.). */
+    /** Verifica que el número parezca real (no vacío, no todo ceros, no dummy como +530000000, etc.). */
     fun isValidPhoneNumber(num: String?): Boolean {
         if (num.isNullOrBlank()) return false
-        val digits = num.filter { it.isDigit() }
-        if (digits.length < 7) return false
+        val trimmed = num.trim()
+        if (trimmed.contains(":") || (trimmed.contains("-") && trimmed.count { it == '-' } >= 3)) {
+            // Dirección MAC u otro formato no telefónico
+            return false
+        }
+        val digits = trimmed.filter { it.isDigit() }
+        if (digits.length < 7 || digits.length > 15) return false
         if (digits.all { it == '0' }) return false
         if (digits.startsWith("00000")) return false
-        if (digits.length > 15) return false
+
+        // Rechazo explícito de +530000000 o variantes con ceros como número cubano dummy
+        if (digits.startsWith("53")) {
+            val national = digits.substring(2)
+            if (national.length < 8 || national.all { it == '0' } || national.startsWith("000") || national.startsWith("0000")) {
+                return false
+            }
+        }
+
+        // Rechazar si todos los dígitos después de los 2 o 3 primeros son ceros (ej: +10000000, +3400000000)
+        if (digits.length >= 6 && digits.takeLast(6).all { it == '0' }) return false
+        if (digits.length > 3 && digits.substring(2).all { it == '0' }) return false
+        if (digits.length > 4 && digits.substring(3).all { it == '0' }) return false
+
+        // Rechazar secuencias de prueba conocidas
+        if (digits == "1234567" || digits == "12345678" || digits == "0123456789" || digits == "1234567890") {
+            return false
+        }
+
         return true
     }
 
@@ -159,7 +182,11 @@ object SimDetectionUtil {
     }
 
     fun generateSsid(phoneNumber: String): String {
-        val clean = if (phoneNumber.isNotBlank()) sanitizePhoneNumber(phoneNumber) else "+0000000000"
+        val clean = if (isValidPhoneNumber(phoneNumber)) {
+            sanitizePhoneNumber(phoneNumber)
+        } else {
+            "Node_${kotlin.math.abs(phoneNumber.hashCode() % 10000)}"
+        }
         return "ChatMesh_$clean"
     }
 

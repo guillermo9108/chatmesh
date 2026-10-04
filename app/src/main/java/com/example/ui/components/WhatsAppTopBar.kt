@@ -16,6 +16,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.mesh.VideoQuality
 import com.example.ui.theme.WhatsAppGreenAccent
 import com.example.ui.theme.WhatsAppTeal
 
@@ -30,6 +31,9 @@ fun WhatsAppTopBar(
     onSimConfigClick: () -> Unit,
     onMeshSettingsClick: () -> Unit,
     onGitHubClick: () -> Unit,
+    onVideoQualityClick: () -> Unit = {},
+    onShareAppClick: () -> Unit = {},
+    currentVideoQuality: VideoQuality = VideoQuality.MEDIUM,
     unreadChatsCount: Int,
     connectedNodesCount: Int,
     ssidName: String
@@ -47,14 +51,15 @@ fun WhatsAppTopBar(
                     Text(
                         text = "ChatMesh",
                         color = Color.White,
-                        fontSize = 20.sp,
+                        fontSize = 19.sp,
                         fontWeight = FontWeight.Bold
                     )
                     if (ssidName.isNotBlank()) {
                         Text(
                             text = ssidName,
-                            color = Color.White.copy(alpha = 0.8f),
-                            fontSize = 11.sp
+                            color = Color.White.copy(alpha = 0.85f),
+                            fontSize = 11.sp,
+                            maxLines = 1
                         )
                     }
                 }
@@ -128,6 +133,28 @@ fun WhatsAppTopBar(
                             }
                         )
                         DropdownMenuItem(
+                            text = {
+                                Column {
+                                    Text("Calidad de Videollamada")
+                                    Text(currentVideoQuality.title, fontSize = 11.sp, color = WhatsAppTeal)
+                                }
+                            },
+                            leadingIcon = { Icon(Icons.Default.Videocam, contentDescription = null, tint = WhatsAppTeal) },
+                            onClick = {
+                                menuExpanded = false
+                                onVideoQualityClick()
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Compartir Aplicación") },
+                            leadingIcon = { Icon(Icons.Default.Share, contentDescription = null, tint = WhatsAppTeal) },
+                            onClick = {
+                                menuExpanded = false
+                                onShareAppClick()
+                            }
+                        )
+                        HorizontalDivider()
+                        DropdownMenuItem(
                             text = { Text("Red WiFi LAN (Router)") },
                             leadingIcon = { Icon(Icons.Default.Router, contentDescription = null, tint = WhatsAppTeal) },
                             onClick = {
@@ -164,18 +191,21 @@ fun WhatsAppTopBar(
             }
         )
 
-        // Tab bar
-        val tabs = listOf("CHATS", "CONTACTOS", "NODOS MESH", "LLAMADAS")
-        TabRow(
+        // Tab bar optimizada para pantallas pequeñas / baja resolución
+        val tabs = listOf("CHATS", "CONTACTOS", "NODOS", "LLAMADAS")
+        ScrollableTabRow(
             selectedTabIndex = selectedTabIndex,
             containerColor = WhatsAppTeal,
             contentColor = Color.White,
+            edgePadding = 0.dp,
             indicator = { tabPositions ->
-                TabRowDefaults.SecondaryIndicator(
-                    modifier = Modifier.tabIndicatorOffset(tabPositions[selectedTabIndex]),
-                    height = 3.dp,
-                    color = Color.White
-                )
+                if (selectedTabIndex < tabPositions.size) {
+                    TabRowDefaults.SecondaryIndicator(
+                        modifier = Modifier.tabIndicatorOffset(tabPositions[selectedTabIndex]),
+                        height = 3.dp,
+                        color = Color.White
+                    )
+                }
             }
         ) {
             tabs.forEachIndexed { index, title ->
@@ -183,20 +213,24 @@ fun WhatsAppTopBar(
                     selected = selectedTabIndex == index,
                     onClick = { onTabSelected(index) },
                     text = {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                        ) {
                             Text(
                                 text = title,
-                                fontSize = 13.sp,
+                                fontSize = 12.sp,
                                 fontWeight = if (selectedTabIndex == index) FontWeight.Bold else FontWeight.Medium,
-                                color = if (selectedTabIndex == index) Color.White else Color.White.copy(alpha = 0.7f)
+                                color = if (selectedTabIndex == index) Color.White else Color.White.copy(alpha = 0.7f),
+                                maxLines = 1
                             )
                             if (index == 0 && unreadChatsCount > 0) {
-                                Spacer(modifier = Modifier.width(6.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
                                 Box(
                                     modifier = Modifier
                                         .clip(CircleShape)
                                         .background(WhatsAppGreenAccent)
-                                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                                        .padding(horizontal = 5.dp, vertical = 1.dp)
                                 ) {
                                     Text(
                                         text = unreadChatsCount.toString(),
@@ -206,12 +240,12 @@ fun WhatsAppTopBar(
                                     )
                                 }
                             } else if (index == 2 && connectedNodesCount > 0) {
-                                Spacer(modifier = Modifier.width(6.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
                                 Box(
                                     modifier = Modifier
                                         .clip(CircleShape)
                                         .background(Color.White)
-                                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                                        .padding(horizontal = 5.dp, vertical = 1.dp)
                                 ) {
                                     Text(
                                         text = connectedNodesCount.toString(),

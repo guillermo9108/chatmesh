@@ -93,16 +93,16 @@ fun ChatItemRow(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 12.dp),
+            .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         UserAvatar(
             avatarUri = contact.avatarUri,
             displayName = contact.displayName.ifBlank { contact.phoneNumber },
-            size = 48.dp
+            size = 42.dp
         )
 
-        Spacer(modifier = Modifier.width(16.dp))
+        Spacer(modifier = Modifier.width(12.dp))
 
         Column(modifier = Modifier.weight(1f)) {
             Row(
@@ -110,13 +110,23 @@ fun ChatItemRow(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    text = contact.displayName.ifBlank { contact.phoneNumber },
-                    fontWeight = FontWeight.SemiBold,
-                    fontSize = 16.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = contact.displayName.ifBlank { "Contacto" },
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 15.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = contact.phoneNumber,
+                        fontSize = 12.sp,
+                        color = WhatsAppTeal,
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
                 if (contact.lastMessageTime > 0) {
                     val timeStr = SimpleDateFormat("h:mm a", Locale.getDefault())
                         .format(Date(contact.lastMessageTime))
@@ -128,7 +138,7 @@ fun ChatItemRow(
                 }
             }
 
-            Spacer(modifier = Modifier.height(4.dp))
+            Spacer(modifier = Modifier.height(2.dp))
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -137,7 +147,7 @@ fun ChatItemRow(
             ) {
                 Text(
                     text = contact.lastMessageText ?: "Toca para chatear",
-                    fontSize = 14.sp,
+                    fontSize = 13.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -148,11 +158,11 @@ fun ChatItemRow(
                         modifier = Modifier
                             .clip(CircleShape)
                             .background(WhatsAppGreenAccent)
-                            .padding(horizontal = 7.dp, vertical = 2.dp)
+                            .padding(horizontal = 6.dp, vertical = 1.dp)
                     ) {
                         Text(
                             text = contact.unreadCount.toString(),
-                            fontSize = 11.sp,
+                            fontSize = 10.sp,
                             fontWeight = FontWeight.Bold,
                             color = Color.Black
                         )

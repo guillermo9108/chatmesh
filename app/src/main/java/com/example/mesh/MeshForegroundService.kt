@@ -14,8 +14,13 @@ import com.example.data.db.ChatMeshDatabase
 import com.example.data.repository.ChatMeshRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import android.util.Log
 
 /**
  * Servicio en primer plano que mantiene viva la malla WiFi Direct incluso
@@ -53,6 +58,7 @@ class MeshForegroundService : Service() {
 
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var wakeLock: PowerManager.WakeLock? = null
+    private var monitorJob: Job? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -61,7 +67,7 @@ class MeshForegroundService : Service() {
         running = true
 
         createNotificationChannel()
-        startForeground(NOTIFICATION_ID, buildNotification("Malla P2P activa"))
+        startForeground(NOTIFICATION_ID, buildNotification("Malla P2P activa • Supervisando"))
 
         acquireWakeLock()
 
@@ -79,6 +85,45 @@ class MeshForegroundService : Service() {
         } catch (_: Exception) {
             // Si falla, la app igual arranca y el VM lo reintenta
         }
+
+        startBackgroundMeshMonitor()
+    }
+
+    private fun startBackgroundMeshMonitor() {
+        monitorJob?.cancel()
+        monitorJob = scope.launch {
+            while (isActive && running) {
+                try {
+                    val engine = MeshEngineHolder.engine
+                    if (engine != null) {
+                        val statusText = engine.checkAndRecoverMeshConnection()
+                        updateNotification(statusText)
+                    } else {
+                        try {
+                            val db = ChatMeshDatabase.getDatabase(applicationContext)
+                            val repo = ChatMeshRepository(
+                                db.userDao(),
+                                db.contactDao(),
+                                db.messageDao(),
+                                db.meshNodeDao(),
+                                db.callDao()
+                            )
+                            MeshEngineHolder.init(applicationContext, repo)
+                        } catch (_: Exception) {}
+                    }
+                } catch (e: Exception) {
+                    Log.e("MeshForegroundService", "Error en monitor en segundo plano", e)
+                }
+                delay(7000)
+            }
+        }
+    }
+
+    private fun updateNotification(text: String) {
+        try {
+            val nm = getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+            nm?.notify(NOTIFICATION_ID, buildNotification(text))
+        } catch (_: Exception) {}
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -88,6 +133,8 @@ class MeshForegroundService : Service() {
 
     override fun onDestroy() {
         running = false
+        monitorJob?.cancel()
+        monitorJob = null
         try {
             wakeLock?.let { if (it.isHeld) it.release() }
         } catch (_: Exception) {}

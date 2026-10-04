@@ -23,9 +23,33 @@ class ChatMeshRepository(
     suspend fun getAllContactsList(): List<ContactEntity> = contactDao.getAllContactsList()
     suspend fun getContact(phone: String): ContactEntity? = contactDao.getContactByPhone(phone)
     fun getContactFlow(phone: String): Flow<ContactEntity?> = contactDao.getContactFlow(phone)
-    suspend fun insertContact(contact: ContactEntity): Long = contactDao.insertIfNotExist(contact)
-    suspend fun saveContact(contact: ContactEntity) = contactDao.insertOrUpdate(contact)
-    suspend fun insertAllContacts(contacts: List<ContactEntity>) = contactDao.insertAll(contacts)
+
+    suspend fun insertContact(contact: ContactEntity): Long {
+        if (!com.example.mesh.SimDetectionUtil.isValidPhoneNumber(contact.phoneNumber)) {
+            return -1L
+        }
+        return contactDao.insertIfNotExist(contact)
+    }
+
+    suspend fun saveContact(contact: ContactEntity) {
+        if (!com.example.mesh.SimDetectionUtil.isValidPhoneNumber(contact.phoneNumber)) {
+            return
+        }
+        contactDao.insertOrUpdate(contact)
+    }
+
+    suspend fun insertAllContacts(contacts: List<ContactEntity>) {
+        val valid = contacts.filter { com.example.mesh.SimDetectionUtil.isValidPhoneNumber(it.phoneNumber) }
+        if (valid.isNotEmpty()) {
+            contactDao.insertAll(valid)
+        }
+    }
+
+    suspend fun cleanInvalidContacts() {
+        try {
+            contactDao.deleteInvalidContacts()
+        } catch (_: Exception) {}
+    }
     suspend fun updateLastMessage(phone: String, text: String, time: Long) =
         contactDao.updateLastMessage(phone, text, time)
 

@@ -38,8 +38,7 @@ fun PhoneRegistrationScreen(
     var nickname by remember { mutableStateOf("") }
     var localError by remember { mutableStateOf<String?>(null) }
 
-    val cleanDigits = phone.filter { it.isDigit() }
-    val isValidPhone = cleanDigits.length in 7..15
+    val isValidPhone = com.example.mesh.SimDetectionUtil.isValidPhoneNumber(phone)
 
     Column(
         modifier = modifier
@@ -47,17 +46,18 @@ fun PhoneRegistrationScreen(
             .background(MaterialTheme.colorScheme.background)
             .statusBarsPadding()
             .navigationBarsPadding()
+            .imePadding()
             .verticalScroll(scroll)
-            .padding(24.dp),
+            .padding(16.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Spacer(modifier = Modifier.height(20.dp))
+        Spacer(modifier = Modifier.height(12.dp))
 
         Icon(
             imageVector = Icons.Default.SimCard,
             contentDescription = null,
             tint = WhatsAppTeal,
-            modifier = Modifier.size(72.dp)
+            modifier = Modifier.size(56.dp)
         )
 
         Spacer(modifier = Modifier.height(16.dp))
@@ -197,9 +197,9 @@ fun PhoneRegistrationScreen(
             onClick = {
                 val digits = phone.filter { it.isDigit() }
                 when {
-                    digits.length < 7 -> localError = "El número debe tener al menos 7 dígitos"
-                    digits.length > 15 -> localError = "El número es demasiado largo"
-                    digits.all { it == '0' } -> localError = "El número no puede ser todo ceros"
+                    !com.example.mesh.SimDetectionUtil.isValidPhoneNumber(phone) -> {
+                        localError = "Por favor ingresa un número de teléfono válido (no ceros ni dummy)"
+                    }
                     nickname.isBlank() -> localError = "Escribe un nombre o apodo"
                     else -> {
                         localError = null

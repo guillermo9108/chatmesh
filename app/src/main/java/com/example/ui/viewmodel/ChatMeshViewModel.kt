@@ -1,6 +1,7 @@
 package com.example.ui.viewmodel
 
 import android.app.Application
+import android.content.Context
 import android.net.wifi.p2p.WifiP2pDevice
 import android.os.Build
 import androidx.lifecycle.AndroidViewModel
@@ -8,6 +9,7 @@ import androidx.lifecycle.viewModelScope
 import com.example.data.db.ChatMeshDatabase
 import com.example.data.entity.*
 import com.example.data.repository.ChatMeshRepository
+import com.example.mesh.BleScoreCalculator
 import com.example.mesh.ContactSyncUtil
 import com.example.mesh.DeviceIdentity
 import com.example.mesh.HotspotConnector
@@ -15,6 +17,7 @@ import com.example.mesh.MeshEngineHolder
 import com.example.mesh.MeshEngineState
 import com.example.mesh.SimCardInfo
 import com.example.mesh.SimDetectionUtil
+import com.example.mesh.VideoQuality
 import com.example.mesh.WiFiMeshEngine
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -48,6 +51,18 @@ class ChatMeshViewModel(application: Application) : AndroidViewModel(application
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val engineState: StateFlow<MeshEngineState> = meshEngine.engineState
+
+    val blePeersPhones: StateFlow<List<String>> = engineState
+        .map { it.blePeersPhones }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val bleEnabled: StateFlow<Boolean> = engineState
+        .map { it.bleEnabled }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+
+    val isBleNegotiatingGo: StateFlow<Boolean> = engineState
+        .map { it.isBleNegotiatingGo }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
 
     private val _realSimDetails = MutableStateFlow(SimDetectionUtil.getRealSimDetails(application))
     val realSimDetails: StateFlow<SimCardInfo> = _realSimDetails.asStateFlow()
@@ -86,7 +101,30 @@ class ChatMeshViewModel(application: Application) : AndroidViewModel(application
     private val _hotspotConnectionStatus = MutableStateFlow("")
     val hotspotConnectionStatus: StateFlow<String> = _hotspotConnectionStatus.asStateFlow()
 
+    private val _videoQuality = MutableStateFlow(VideoQuality.MEDIUM)
+    val videoQuality: StateFlow<VideoQuality> = _videoQuality.asStateFlow()
+
+    fun setVideoQuality(quality: VideoQuality) {
+        _videoQuality.value = quality
+        meshEngine.setVideoQuality(quality)
+        getApplication<Application>().getSharedPreferences("chatmesh_prefs", Context.MODE_PRIVATE)
+            .edit()
+            .putString("video_quality", quality.name)
+            .apply()
+    }
+
     init {
+        val savedQuality = getApplication<Application>()
+            .getSharedPreferences("chatmesh_prefs", Context.MODE_PRIVATE)
+            .getString("video_quality", null)
+        val initialQuality = VideoQuality.fromName(savedQuality)
+        _videoQuality.value = initialQuality
+        meshEngine.setVideoQuality(initialQuality)
+
+        viewModelScope.launch {
+            repository.cleanInvalidContacts()
+        }
+
         viewModelScope.launch { bootstrapUser() }
         viewModelScope.launch {
             meshEngine.engineState.collect { state ->
@@ -286,14 +324,26 @@ class ChatMeshViewModel(application: Application) : AndroidViewModel(application
 
     fun addNewManualContact(displayName: String, phoneNumber: String) {
         val cleanPhone = SimDetectionUtil.sanitizePhoneNumber(phoneNumber)
+        if (!SimDetectionUtil.isValidPhoneNumber(cleanPhone)) return
         viewModelScope.launch {
-            repository.insertContact(
-                ContactEntity(
-                    phoneNumber = cleanPhone,
-                    displayName = displayName.ifBlank { cleanPhone },
-                    isRegisteredInMesh = false
+            val existing = repository.getContact(cleanPhone)
+            val nameToUse = displayName.ifBlank { cleanPhone }
+            if (existing != null) {
+                repository.saveContact(
+                    existing.copy(displayName = nameToUse)
                 )
-            )
+            } else {
+                repository.insertContact(
+                    ContactEntity(
+                        phoneNumber = cleanPhone,
+                        displayName = nameToUse,
+                        isRegisteredInMesh = false
+                    )
+                )
+            }
+            if (_selectedContact.value?.phoneNumber == cleanPhone) {
+                _selectedContact.value = _selectedContact.value?.copy(displayName = nameToUse)
+            }
         }
     }
 
@@ -386,6 +436,21 @@ class ChatMeshViewModel(application: Application) : AndroidViewModel(application
     fun dismissHotspotSharedFromPeer() { _hotspotSharedFromPeer.value = false }
     fun setHotspotRequestFromIntent(phone: String) { _hotspotRequestFromPeer.value = phone }
     fun getKnownPeerPhones(): List<String> = meshEngine.getKnownPeerPhones()
+
+    fun getMyBleScore(): Int {
+        return try {
+            val bm = getApplication<Application>().getSystemService(Context.BATTERY_SERVICE) as android.os.BatteryManager
+            val level = bm.getIntProperty(android.os.BatteryManager.BATTERY_PROPERTY_CAPACITY)
+            val status = bm.getIntProperty(android.os.BatteryManager.BATTERY_PROPERTY_STATUS)
+            val charging = status == android.os.BatteryManager.BATTERY_STATUS_CHARGING ||
+                           status == android.os.BatteryManager.BATTERY_STATUS_FULL
+            val cm = getApplication<Application>().getSystemService(Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
+            val network = cm.activeNetwork
+            val caps = if (network != null) cm.getNetworkCapabilities(network) else null
+            val hasInternet = caps?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
+            BleScoreCalculator.calculate(level, charging, hasInternet, android.os.Build.VERSION.SDK_INT)
+        } catch (_: Exception) { 0 }
+    }
 
     fun startP2pDiscovery() { meshEngine.startP2pDiscovery() }
     fun reCreateP2pGroup() { meshEngine.reCreateP2pGroup() }

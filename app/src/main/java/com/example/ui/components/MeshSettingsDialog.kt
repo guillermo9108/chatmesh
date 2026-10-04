@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Bluetooth
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Router
@@ -43,6 +44,10 @@ fun MeshSettingsDialog(
     onDismissHotspotRequest: () -> Unit = {},
     onDismissHotspotShared: () -> Unit = {},
     availablePeerPhones: List<String> = emptyList(),
+    myBleScore: Int = 0,
+    blePeersPhones: List<String> = emptyList(),
+    bleEnabled: Boolean = false,
+    isBleNegotiatingGo: Boolean = false,
     onDismiss: () -> Unit
 ) {
     val scrollState = rememberScrollState()
@@ -615,6 +620,75 @@ fun MeshSettingsDialog(
                                 .testTag("scan_peers_button")
                         ) {
                             Text("Escanear Dispositivos P2P", fontSize = 13.sp)
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                // ==========================================
+                // SECCIÓN 4: DESCUBRIMIENTO BLE (BLUETOOTH LOW ENERGY)
+                // ==========================================
+                Text(
+                    text = "4. Descubrimiento BLE (Autonegociación GO):",
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 13.sp
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+
+                Card(
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                Icons.Default.Bluetooth,
+                                contentDescription = null,
+                                tint = if (bleEnabled) WhatsAppTeal else Color.Gray,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = if (bleEnabled) "BLE: ACTIVO" else "BLE: Inactivo / Sin Permisos",
+                                fontWeight = FontWeight.Medium,
+                                fontSize = 13.sp
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "Mi Puntuación de Nodo: $myBleScore pts",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = WhatsAppTeal
+                        )
+                        Text(
+                            text = if (isBleNegotiatingGo) "Estado: Negociando Group Owner (GO)..." else "Estado: Supervisando red BLE en paralelo",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "Pares BLE detectados (${blePeersPhones.size}):",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                        if (blePeersPhones.isEmpty()) {
+                            Text(
+                                text = "Buscando dispositivos cercanos automáticamente...",
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        } else {
+                            blePeersPhones.forEach { phone ->
+                                Text(
+                                    text = "• $phone",
+                                    fontSize = 11.sp,
+                                    color = WhatsAppTeal
+                                )
+                            }
                         }
                     }
                 }
