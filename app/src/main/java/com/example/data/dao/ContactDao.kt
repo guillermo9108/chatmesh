@@ -27,6 +27,9 @@ interface ContactDao {
     @Query("SELECT * FROM contacts WHERE lastMessageTime > 0 OR unreadCount > 0 ORDER BY lastMessageTime DESC")
     fun getChatContactsFlow(): Flow<List<ContactEntity>>
 
+    @Query("SELECT * FROM contacts WHERE isConnected = 1 OR lastSeen > :activeThreshold ORDER BY isConnected DESC, lastSeen DESC")
+    fun getOnlineContactsFlow(activeThreshold: Long): Flow<List<ContactEntity>>
+
     @Query("SELECT * FROM contacts WHERE phoneNumber = :phone LIMIT 1")
     suspend fun getContactByPhone(phone: String): ContactEntity?
 

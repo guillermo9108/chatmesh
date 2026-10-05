@@ -107,6 +107,19 @@ object SimDetectionUtil {
         return true
     }
 
+    /** Compara dos números de teléfono considerando código de país y últimos dígitos */
+    fun isMatchingPhone(phone1: String?, phone2: String?): Boolean {
+        if (phone1.isNullOrBlank() || phone2.isNullOrBlank()) return false
+        if (phone1 == phone2) return true
+        val digits1 = phone1.filter { it.isDigit() }
+        val digits2 = phone2.filter { it.isDigit() }
+        if (digits1.isNotEmpty() && digits1 == digits2) return true
+        if (digits1.length >= 7 && digits2.length >= 7) {
+            if (digits1.takeLast(7) == digits2.takeLast(7)) return true
+        }
+        return false
+    }
+
     // ============================================================
     //  PERSISTENCIA
     // ============================================================

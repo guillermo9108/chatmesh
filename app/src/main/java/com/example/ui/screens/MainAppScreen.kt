@@ -29,6 +29,7 @@ fun MainAppScreen(
     val userProfile by viewModel.userProfile.collectAsStateWithLifecycle()
     val chatContacts by viewModel.chatContacts.collectAsStateWithLifecycle()
     val allContacts by viewModel.allContacts.collectAsStateWithLifecycle()
+    val onlineContacts by viewModel.onlineContacts.collectAsStateWithLifecycle()
     val meshNodes by viewModel.meshNodes.collectAsStateWithLifecycle()
     val calls by viewModel.calls.collectAsStateWithLifecycle()
     val engineState by viewModel.engineState.collectAsStateWithLifecycle()
@@ -196,6 +197,7 @@ fun MainAppScreen(
                         when (selectedTabIndex) {
                             0 -> ChatsTab(
                                 chats = chatContacts,
+                                onlineContacts = onlineContacts,
                                 onChatClick = { contact -> viewModel.selectContact(contact) }
                             )
                             1 -> ContactsTab(

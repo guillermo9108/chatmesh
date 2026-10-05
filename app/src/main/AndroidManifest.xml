@@ -79,6 +79,10 @@
             android:name="com.example.mesh.MeshForegroundService"
             android:exported="false"
             android:foregroundServiceType="connectedDevice|dataSync" />
+
+        <service
+            android:name="com.example.mesh.WifiDirectP2pService"
+            android:exported="false" />
     </application>
 
 </manifest>

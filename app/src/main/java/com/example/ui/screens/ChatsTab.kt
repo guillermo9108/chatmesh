@@ -22,6 +22,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.example.data.entity.ContactEntity
+import com.example.ui.components.OnlineUsersRow
 import com.example.ui.components.UserAvatar
 import com.example.ui.theme.WhatsAppGreenAccent
 import com.example.ui.theme.WhatsAppGreenLight
@@ -32,53 +33,68 @@ import java.util.*
 @Composable
 fun ChatsTab(
     chats: List<ContactEntity>,
+    onlineContacts: List<ContactEntity> = emptyList(),
     onChatClick: (ContactEntity) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    if (chats.isEmpty()) {
-        Box(
-            modifier = modifier
-                .fillMaxSize()
-                .padding(32.dp),
-            contentAlignment = Alignment.Center
-        ) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Icon(
-                    imageVector = Icons.Default.Chat,
-                    contentDescription = null,
-                    tint = WhatsAppGreenLight.copy(alpha = 0.5f),
-                    modifier = Modifier.size(64.dp)
-                )
-                Spacer(modifier = Modifier.height(16.dp))
-                Text(
-                    text = "No tienes conversaciones activas",
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 16.sp
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                Text(
-                    text = "Selecciona un contacto en la pestaña CONTACTOS para iniciar un chat directo sin internet.",
-                    fontSize = 13.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                )
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .testTag("chats_tab_root")
+    ) {
+        // Fila horizontal de usuarios en línea (estilo Messenger)
+        OnlineUsersRow(
+            onlineContacts = onlineContacts,
+            onContactClick = onChatClick
+        )
+
+        if (chats.isEmpty()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(32.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(
+                        imageVector = Icons.Default.Chat,
+                        contentDescription = null,
+                        tint = WhatsAppGreenLight.copy(alpha = 0.5f),
+                        modifier = Modifier.size(64.dp)
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text(
+                        text = "No tienes conversaciones activas",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 16.sp
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "Selecciona un contacto en la pestaña CONTACTOS o en los usuarios en línea de arriba para iniciar un chat directo sin internet.",
+                        fontSize = 13.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                    )
+                }
             }
-        }
-    } else {
-        LazyColumn(
-            modifier = modifier
-                .fillMaxSize()
-                .testTag("chats_list")
-        ) {
-            items(chats, key = { it.phoneNumber }) { contact ->
-                ChatItemRow(
-                    contact = contact,
-                    onClick = { onChatClick(contact) }
-                )
-                HorizontalDivider(
-                    modifier = Modifier.padding(start = 76.dp),
-                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
-                )
+        } else {
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .testTag("chats_list")
+            ) {
+                items(chats, key = { it.phoneNumber }) { contact ->
+                    val isUserOnline = contact.isConnected || onlineContacts.any { it.phoneNumber == contact.phoneNumber }
+                    ChatItemRow(
+                        contact = contact,
+                        isOnline = isUserOnline,
+                        onClick = { onChatClick(contact) }
+                    )
+                    HorizontalDivider(
+                        modifier = Modifier.padding(start = 76.dp),
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
+                    )
+                }
             }
         }
     }
@@ -87,6 +103,7 @@ fun ChatsTab(
 @Composable
 fun ChatItemRow(
     contact: ContactEntity,
+    isOnline: Boolean = false,
     onClick: () -> Unit
 ) {
     Row(
@@ -96,11 +113,31 @@ fun ChatItemRow(
             .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        UserAvatar(
-            avatarUri = contact.avatarUri,
-            displayName = contact.displayName.ifBlank { contact.phoneNumber },
-            size = 42.dp
-        )
+        Box(contentAlignment = Alignment.Center) {
+            UserAvatar(
+                avatarUri = contact.avatarUri,
+                displayName = contact.displayName.ifBlank { contact.phoneNumber },
+                size = 44.dp
+            )
+            if (isOnline) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .offset(x = 1.dp, y = 1.dp)
+                        .size(12.dp)
+                        .clip(CircleShape)
+                        .background(Color.White)
+                        .padding(1.5.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .clip(CircleShape)
+                            .background(WhatsAppGreenAccent)
+                    )
+                }
+            }
+        }
 
         Spacer(modifier = Modifier.width(12.dp))
 

@@ -14,6 +14,8 @@ class ChatMeshRepository(
     val userProfileFlow: Flow<UserProfile?> = userDao.getUserProfileFlow()
     val allContactsFlow: Flow<List<ContactEntity>> = contactDao.getAllContactsFlow()
     val chatContactsFlow: Flow<List<ContactEntity>> = contactDao.getChatContactsFlow()
+    fun getOnlineContactsFlow(activeThreshold: Long = System.currentTimeMillis() - 120_000L): Flow<List<ContactEntity>> =
+        contactDao.getOnlineContactsFlow(activeThreshold)
     val allMeshNodesFlow: Flow<List<MeshNodeEntity>> = meshNodeDao.getAllNodesFlow()
     val allCallsFlow: Flow<List<CallEntity>> = callDao.getAllCallsFlow()
 

@@ -22,7 +22,7 @@ class P2pVideoCallManager(
         private const val TAG = "P2pVideoCallManager"
     }
 
-    private var currentQuality: VideoQuality = VideoQuality.MEDIUM
+    private var currentQuality: VideoQuality = VideoQuality.HIGH
 
     fun setVideoQuality(quality: VideoQuality) {
         if (currentQuality == quality) return
@@ -132,9 +132,20 @@ class P2pVideoCallManager(
             val cameraId = findCameraId(cameraManager, isFrontFacing)
                 ?: cameraManager.cameraIdList.firstOrNull() ?: return
 
+            val characteristics = cameraManager.getCameraCharacteristics(cameraId)
+            val map = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
+            val jpegSizes = map?.getOutputSizes(ImageFormat.JPEG) ?: emptyArray()
+
             val targetW = currentQuality.width
             val targetH = currentQuality.height
-            imageReader = ImageReader.newInstance(targetW, targetH, ImageFormat.JPEG, 2)
+            // Elegir el tamaño soportado por hardware más cercano a la calidad solicitada
+            val chosenSize = jpegSizes.minByOrNull { size ->
+                val dw = Math.abs(size.width - targetW)
+                val dh = Math.abs(size.height - targetH)
+                dw + dh
+            } ?: android.util.Size(targetW, targetH)
+
+            imageReader = ImageReader.newInstance(chosenSize.width, chosenSize.height, ImageFormat.JPEG, 2)
             imageReader?.setOnImageAvailableListener({ reader ->
                 if (!isStreamingActive) return@setOnImageAvailableListener
                 try {
@@ -199,19 +210,20 @@ class P2pVideoCallManager(
         var width = bitmap.width
         var height = bitmap.height
 
-        repeat(6) { attempt ->
+        repeat(5) { attempt ->
             val out = ByteArrayOutputStream()
             working.compress(Bitmap.CompressFormat.JPEG, quality, out)
             val bytes = out.toByteArray()
             if (bytes.size <= maxBytes) {
                 if (attempt > 0) {
-                    Log.d(TAG, "Frame ajustado intento $attempt: ${bytes.size} bytes, ${width}x$height, q=$quality")
+                    Log.d(TAG, "Frame adaptado intento $attempt: ${bytes.size} bytes, ${width}x$height, q=$quality")
                 }
                 return bytes
             }
-            quality = (quality - 8).coerceAtLeast(10)
-            width = (width * 0.85f).toInt().coerceAtLeast(60)
-            height = (height * 0.85f).toInt().coerceAtLeast(45)
+            // Reducir compresión y escala suavemente si excede el límite de paquete
+            quality = (quality - 6).coerceAtLeast(35)
+            width = (width * 0.92f).toInt().coerceAtLeast(160)
+            height = (height * 0.92f).toInt().coerceAtLeast(120)
             working = Bitmap.createScaledBitmap(working, width, height, true)
         }
         Log.w(TAG, "Frame descartado por superar $maxBytes bytes")

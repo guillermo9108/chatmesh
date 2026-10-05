@@ -667,6 +667,22 @@ class WiFiMeshEngine(
     }
 
     fun startP2pDiscovery() {
+        val p2pService = WifiDirectP2pService.instance
+        if (p2pService != null) {
+            p2pService.startPeerDiscovery(object : WifiP2pManager.ActionListener {
+                override fun onSuccess() {
+                    _engineState.value = _engineState.value.copy(
+                        autoConnectStatus = "Escaneando dispositivos WiFi Direct..."
+                    )
+                }
+                override fun onFailure(reason: Int) {
+                    _engineState.value = _engineState.value.copy(
+                        autoConnectStatus = "Descubrimiento falló ($reason)"
+                    )
+                }
+            })
+            return
+        }
         val ch = p2pChannel ?: return
         try {
             p2pManager?.discoverPeers(ch, object : WifiP2pManager.ActionListener {
@@ -707,6 +723,21 @@ class WiFiMeshEngine(
     }
 
     private fun doConnect(config: WifiP2pConfig, deviceName: String?) {
+        val p2pService = WifiDirectP2pService.instance
+        if (p2pService != null) {
+            p2pService.connect(config, object : WifiP2pManager.ActionListener {
+                override fun onSuccess() {
+                    Log.i(TAG, "Conexión WiFi Direct vía P2pService iniciada con $deviceName")
+                    _engineState.value = _engineState.value.copy(
+                        autoConnectStatus = "Conectando a ${deviceName ?: "dispositivo"}..."
+                    )
+                }
+                override fun onFailure(reason: Int) {
+                    Log.w(TAG, "Fallo al conectar con $deviceName vía P2pService: $reason")
+                }
+            })
+            return
+        }
         val ch = p2pChannel ?: return
         p2pManager?.connect(ch, config, object : WifiP2pManager.ActionListener {
             override fun onSuccess() {

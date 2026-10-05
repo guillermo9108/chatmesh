@@ -36,8 +36,9 @@ class MainActivity : ComponentActivity() {
         )
         MeshEngineHolder.init(applicationContext, repo)
 
-        // 2. Arrancar el servicio en primer plano para mantener vivo el proceso
+        // 2. Arrancar el servicio en primer plano y el servicio de gestión WiFi Direct P2P
         MeshForegroundService.start(applicationContext)
+        com.example.mesh.WifiDirectP2pService.start(applicationContext)
 
         enableEdgeToEdge()
         handleIntent(intent)

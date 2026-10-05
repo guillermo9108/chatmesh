@@ -10,36 +10,45 @@ enum class VideoQuality(
     val frameIntervalMs: Long
 ) {
     LOW(
-        title = "Baja (Ahorro)",
-        subtitle = "120x90 • 6 FPS • Muy fluida en conexiones débiles",
-        width = 120,
-        height = 90,
-        maxFrameSize = 900,
-        jpegQuality = 20,
-        frameIntervalMs = 160L
+        title = "Baja (Ahorro de batería)",
+        subtitle = "320x240 • 12 FPS • Mínimo consumo y gran fluidez",
+        width = 320,
+        height = 240,
+        maxFrameSize = 22_000,
+        jpegQuality = 60,
+        frameIntervalMs = 80L
     ),
     MEDIUM(
         title = "Media (Equilibrada)",
-        subtitle = "160x120 • 10 FPS • Calidad estándar recomendada",
-        width = 160,
-        height = 120,
-        maxFrameSize = 1400,
-        jpegQuality = 30,
-        frameIntervalMs = 100L
+        subtitle = "480x360 • 18 FPS • Buena nitidez y movimiento fluido",
+        width = 480,
+        height = 360,
+        maxFrameSize = 50_000,
+        jpegQuality = 75,
+        frameIntervalMs = 55L
     ),
     HIGH(
-        title = "Alta (Máxima nitidez)",
-        subtitle = "240x180 • 15 FPS • Mayor nitidez y detalle",
-        width = 240,
-        height = 180,
-        maxFrameSize = 2800,
-        jpegQuality = 45,
-        frameIntervalMs = 66L
+        title = "Alta (HD Nítida)",
+        subtitle = "640x480 • 24 FPS • Alta resolución y colores vivos",
+        width = 640,
+        height = 480,
+        maxFrameSize = 95_000,
+        jpegQuality = 85,
+        frameIntervalMs = 40L
+    ),
+    ULTRA(
+        title = "Ultra (Máxima calidad 720p)",
+        subtitle = "1280x720 • 30 FPS • Máxima definición y nitidez total",
+        width = 1280,
+        height = 720,
+        maxFrameSize = 180_000,
+        jpegQuality = 90,
+        frameIntervalMs = 33L
     );
 
     companion object {
         fun fromName(name: String?): VideoQuality {
-            return entries.firstOrNull { it.name.equals(name, ignoreCase = true) } ?: MEDIUM
+            return entries.firstOrNull { it.name.equals(name, ignoreCase = true) } ?: HIGH
         }
     }
 }

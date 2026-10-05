@@ -44,6 +44,48 @@ class ChatMeshViewModel(application: Application) : AndroidViewModel(application
     val allContacts: StateFlow<List<ContactEntity>> = repository.allContactsFlow
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    val onlineContacts: StateFlow<List<ContactEntity>> = combine(
+        repository.allContactsFlow,
+        meshEngine.engineState
+    ) { contacts, state ->
+        val activePhones = mutableSetOf<String>()
+        activePhones.addAll(state.blePeersPhones)
+        activePhones.addAll(meshEngine.getKnownNeighborPeers().map { it.phoneNumber })
+        activePhones.addAll(state.discoveredP2pDevices.mapNotNull { dev ->
+            val name = dev.deviceName.orEmpty()
+            if (name.startsWith("ChatMesh_")) name.removePrefix("ChatMesh_") else null
+        })
+
+        val now = System.currentTimeMillis()
+        val matchedContacts = contacts.filter { contact ->
+            contact.isConnected ||
+            (now - contact.lastSeen < 120_000L && contact.isRegisteredInMesh) ||
+            activePhones.any { SimDetectionUtil.isMatchingPhone(it, contact.phoneNumber) }
+        }.toMutableList()
+
+        val knownPeers = meshEngine.getKnownNeighborPeers()
+        for (peer in knownPeers) {
+            if (matchedContacts.none { SimDetectionUtil.isMatchingPhone(it.phoneNumber, peer.phoneNumber) }) {
+                matchedContacts.add(
+                    ContactEntity(
+                        phoneNumber = peer.phoneNumber,
+                        displayName = peer.displayName.ifBlank { peer.phoneNumber },
+                        isRegisteredInMesh = true,
+                        isConnected = true,
+                        lastSeen = peer.lastSeenTimestamp,
+                        meshNodeId = peer.nodeId,
+                        statusText = "Conectado en red malla"
+                    )
+                )
+            }
+        }
+
+        matchedContacts.sortedWith(
+            compareByDescending<ContactEntity> { it.isConnected }
+                .thenByDescending { it.lastSeen }
+        )
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
     val meshNodes: StateFlow<List<MeshNodeEntity>> = repository.allMeshNodesFlow
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 

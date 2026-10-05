@@ -41,6 +41,7 @@ class MeshForegroundService : Service() {
 
         fun start(ctx: Context) {
             val appCtx = ctx.applicationContext
+            WifiDirectP2pService.start(appCtx)
             val intent = Intent(appCtx, MeshForegroundService::class.java)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 appCtx.startForegroundService(intent)
