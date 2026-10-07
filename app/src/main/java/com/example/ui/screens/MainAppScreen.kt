@@ -4,12 +4,14 @@ import android.Manifest
 import android.content.Context
 import android.content.Intent
 import android.os.Build
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -19,6 +21,7 @@ import com.example.ui.components.MeshSettingsDialog
 import com.example.ui.components.SimConfigDialog
 import com.example.ui.components.VideoQualityDialog
 import com.example.ui.components.WhatsAppTopBar
+import com.example.ui.theme.LocalAppDimensions
 import com.example.ui.viewmodel.ChatMeshViewModel
 
 @Composable
@@ -26,6 +29,7 @@ fun MainAppScreen(
     viewModel: ChatMeshViewModel,
     modifier: Modifier = Modifier
 ) {
+    val dims = LocalAppDimensions.current
     val userProfile by viewModel.userProfile.collectAsStateWithLifecycle()
     val chatContacts by viewModel.chatContacts.collectAsStateWithLifecycle()
     val allContacts by viewModel.allContacts.collectAsStateWithLifecycle()
@@ -39,6 +43,11 @@ fun MainAppScreen(
     val searchQuery by viewModel.searchQuery.collectAsStateWithLifecycle()
     val localVideoBitmap by viewModel.localVideoBitmap.collectAsStateWithLifecycle()
     val remoteVideoBitmap by viewModel.remoteVideoBitmap.collectAsStateWithLifecycle()
+
+    // Estados de historias
+    val storiesGrouped by viewModel.storiesGrouped.collectAsStateWithLifecycle()
+    var showStoryCreateScreen by remember { mutableStateOf(false) }
+    var viewingStoryAuthorPhone by remember { mutableStateOf<String?>(null) }
 
     // Estado de registro manual
     val registrationRequired by viewModel.registrationRequired.collectAsStateWithLifecycle()
@@ -63,6 +72,27 @@ fun MainAppScreen(
     val blePeersPhones by viewModel.blePeersPhones.collectAsStateWithLifecycle()
     val bleEnabled by viewModel.bleEnabled.collectAsStateWithLifecycle()
     val isBleNegotiatingGo by viewModel.isBleNegotiatingGo.collectAsStateWithLifecycle()
+
+    val myPhoneNumber = userProfile?.phoneNumber.orEmpty()
+    val unreadStoriesCount = remember(storiesGrouped, myPhoneNumber) {
+        storiesGrouped.filterKeys { it != myPhoneNumber }
+            .values
+            .count { list -> list.any { !it.viewedByMe } }
+    }
+
+    // Manejo de BackHandler para navegación por capas
+    BackHandler(enabled = viewingStoryAuthorPhone != null) {
+        viewingStoryAuthorPhone = null
+    }
+    BackHandler(enabled = viewingStoryAuthorPhone == null && showStoryCreateScreen) {
+        showStoryCreateScreen = false
+    }
+    BackHandler(enabled = viewingStoryAuthorPhone == null && !showStoryCreateScreen && selectedContact != null) {
+        viewModel.selectContact(null)
+    }
+    BackHandler(enabled = viewingStoryAuthorPhone == null && !showStoryCreateScreen && selectedContact == null && selectedTabIndex != 0) {
+        selectedTabIndex = 0
+    }
 
     LaunchedEffect(hotspotRequestFromPeer) {
         if (hotspotRequestFromPeer != null) {
@@ -91,6 +121,7 @@ fun MainAppScreen(
             Manifest.permission.RECORD_AUDIO,
             Manifest.permission.CAMERA,
             Manifest.permission.READ_CONTACTS,
+            Manifest.permission.WRITE_CONTACTS,
             Manifest.permission.READ_PHONE_STATE,
             Manifest.permission.READ_PHONE_NUMBERS
         )
@@ -139,7 +170,34 @@ fun MainAppScreen(
                 )
             }
 
-            // PRIORIDAD 2: Chat abierto
+            // PRIORIDAD 2: Visor de historias
+            viewingStoryAuthorPhone != null -> {
+                val storiesForAuthor = storiesGrouped[viewingStoryAuthorPhone].orEmpty()
+                StoryViewerScreen(
+                    stories = storiesForAuthor,
+                    onStoryViewed = { storyId -> viewModel.markStoryAsViewed(storyId) },
+                    onDeleteStory = { storyId -> viewModel.deleteStory(storyId) },
+                    onGetViewersFlow = { storyId -> viewModel.getStoryViewersFlow(storyId) },
+                    onDismiss = { viewingStoryAuthorPhone = null }
+                )
+            }
+
+            // PRIORIDAD 3: Creación de historia
+            showStoryCreateScreen -> {
+                StoryCreateScreen(
+                    onPublishText = { text, color ->
+                        viewModel.publishTextStory(text, color)
+                        showStoryCreateScreen = false
+                    },
+                    onPublishImage = { base64, caption ->
+                        viewModel.publishImageStory(base64, caption)
+                        showStoryCreateScreen = false
+                    },
+                    onDismiss = { showStoryCreateScreen = false }
+                )
+            }
+
+            // PRIORIDAD 4: Chat abierto
             selectedContact != null -> {
                 ChatDetailScreen(
                     contact = selectedContact!!,
@@ -168,7 +226,7 @@ fun MainAppScreen(
                 )
             }
 
-            // PRIORIDAD 3: Pantalla principal con tabs
+            // PRIORIDAD 5: Pantalla principal con tabs
             else -> {
                 Column(
                     modifier = Modifier
@@ -189,6 +247,7 @@ fun MainAppScreen(
                         onShareAppClick = { shareApp(context) },
                         currentVideoQuality = videoQuality,
                         unreadChatsCount = chatContacts.sumOf { it.unreadCount },
+                        unreadStoriesCount = unreadStoriesCount,
                         connectedNodesCount = engineState.connectedPeersCount,
                         ssidName = engineState.ssid
                     )
@@ -207,7 +266,14 @@ fun MainAppScreen(
                                 onContactClick = { contact -> viewModel.selectContact(contact) },
                                 onInviteContact = { contact -> viewModel.inviteContact(contact) }
                             )
-                            2 -> MeshNodesTab(
+                            2 -> StoryListScreen(
+                                userProfile = userProfile,
+                                myPhoneNumber = myPhoneNumber,
+                                storiesGrouped = storiesGrouped,
+                                onOpenCreateStory = { showStoryCreateScreen = true },
+                                onViewStory = { authorPhone -> viewingStoryAuthorPhone = authorPhone }
+                            )
+                            3 -> MeshNodesTab(
                                 engineState = engineState,
                                 meshNodes = meshNodes,
                                 onScanPeers = { viewModel.startP2pDiscovery() },
@@ -215,7 +281,7 @@ fun MainAppScreen(
                                 onStartHotspot = { viewModel.startHotspot() },
                                 onStopHotspot = { viewModel.stopHotspot() }
                             )
-                            3 -> CallsTab(
+                            4 -> CallsTab(
                                 calls = calls,
                                 onStartCall = { contact, isVideo ->
                                     if (isVideo) {

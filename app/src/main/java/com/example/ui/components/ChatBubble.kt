@@ -37,6 +37,7 @@ fun ChatBubble(
     isDarkTheme: Boolean = isSystemInDarkTheme(),
     modifier: Modifier = Modifier
 ) {
+    val dims = LocalAppDimensions.current
     val context = LocalContext.current
     val isOutgoing = message.isOutgoing
     var isPlaying by remember { mutableStateOf(VoiceMessageHelper.isPlaying(message.messageUuid)) }
@@ -73,15 +74,16 @@ fun ChatBubble(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 8.dp, vertical = 2.dp),
+            .padding(horizontal = dims.screenPadding / 2, vertical = 2.dp),
         horizontalArrangement = if (isOutgoing) Arrangement.End else Arrangement.Start
     ) {
+        val maxBubbleWidth = if (dims.compact) 250.dp else if (dims.expanded) 450.dp else 300.dp
         Box(
             modifier = Modifier
-                .widthIn(min = 64.dp, max = 300.dp)
+                .widthIn(min = 60.dp, max = maxBubbleWidth)
                 .clip(bubbleShape)
                 .background(bgColor)
-                .padding(horizontal = 10.dp, vertical = 6.dp)
+                .padding(horizontal = dims.cardPadding, vertical = 6.dp)
         ) {
             Column {
                 when (message.mediaType) {
@@ -115,7 +117,7 @@ fun ChatBubble(
                             Text(
                                 text = message.content,
                                 color = textColor,
-                                fontSize = 15.sp
+                                fontSize = dims.chatBubbleSize
                             )
                         }
                     }
@@ -168,7 +170,7 @@ fun ChatBubble(
                                 } else 0
                                 Text(
                                     text = if (isPlaying) "${currentSec}s / ${message.audioDurationSeconds}s" else "${message.audioDurationSeconds}s",
-                                    fontSize = 11.sp,
+                                    fontSize = dims.tinySize,
                                     color = timeColor
                                 )
                             }
@@ -189,7 +191,7 @@ fun ChatBubble(
                             Text(
                                 text = message.content,
                                 color = textColor,
-                                fontSize = 14.sp,
+                                fontSize = dims.smallSize,
                                 fontWeight = FontWeight.Medium
                             )
                         }
@@ -198,8 +200,8 @@ fun ChatBubble(
                         Text(
                             text = message.content,
                             color = textColor,
-                            fontSize = 15.sp,
-                            lineHeight = 20.sp
+                            fontSize = dims.chatBubbleSize,
+                            lineHeight = (dims.chatBubbleSize.value * 1.35f).sp
                         )
                     }
                 }
@@ -212,7 +214,7 @@ fun ChatBubble(
                     Text(
                         text = timeString,
                         color = timeColor,
-                        fontSize = 10.sp
+                        fontSize = dims.tinySize
                     )
                     if (isOutgoing) {
                         Spacer(modifier = Modifier.width(4.dp))

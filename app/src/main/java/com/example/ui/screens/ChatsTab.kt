@@ -24,6 +24,7 @@ import coil.compose.AsyncImage
 import com.example.data.entity.ContactEntity
 import com.example.ui.components.OnlineUsersRow
 import com.example.ui.components.UserAvatar
+import com.example.ui.theme.LocalAppDimensions
 import com.example.ui.theme.WhatsAppGreenAccent
 import com.example.ui.theme.WhatsAppGreenLight
 import com.example.ui.theme.WhatsAppTeal
@@ -37,6 +38,8 @@ fun ChatsTab(
     onChatClick: (ContactEntity) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val dims = LocalAppDimensions.current
+
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -52,7 +55,7 @@ fun ChatsTab(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(32.dp),
+                    .padding(dims.screenPadding * 2),
                 contentAlignment = Alignment.Center
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -60,18 +63,18 @@ fun ChatsTab(
                         imageVector = Icons.Default.Chat,
                         contentDescription = null,
                         tint = WhatsAppGreenLight.copy(alpha = 0.5f),
-                        modifier = Modifier.size(64.dp)
+                        modifier = Modifier.size(dims.avatarCall * 0.6f)
                     )
-                    Spacer(modifier = Modifier.height(16.dp))
+                    Spacer(modifier = Modifier.height(dims.itemSpacing * 2))
                     Text(
                         text = "No tienes conversaciones activas",
                         fontWeight = FontWeight.Bold,
-                        fontSize = 16.sp
+                        fontSize = dims.titleSize
                     )
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(dims.itemSpacing))
                     Text(
                         text = "Selecciona un contacto en la pestaña CONTACTOS o en los usuarios en línea de arriba para iniciar un chat directo sin internet.",
-                        fontSize = 13.sp,
+                        fontSize = dims.subtitleSize,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         textAlign = androidx.compose.ui.text.style.TextAlign.Center
                     )
@@ -91,7 +94,7 @@ fun ChatsTab(
                         onClick = { onChatClick(contact) }
                     )
                     HorizontalDivider(
-                        modifier = Modifier.padding(start = 76.dp),
+                        modifier = Modifier.padding(start = dims.avatarMedium + dims.screenPadding * 1.5f),
                         color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
                     )
                 }
@@ -106,25 +109,27 @@ fun ChatItemRow(
     isOnline: Boolean = false,
     onClick: () -> Unit
 ) {
+    val dims = LocalAppDimensions.current
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 8.dp),
+            .padding(horizontal = dims.screenPadding, vertical = dims.listItemPadding),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Box(contentAlignment = Alignment.Center) {
             UserAvatar(
                 avatarUri = contact.avatarUri,
                 displayName = contact.displayName.ifBlank { contact.phoneNumber },
-                size = 44.dp
+                size = dims.avatarMedium
             )
             if (isOnline) {
                 Box(
                     modifier = Modifier
                         .align(Alignment.BottomEnd)
                         .offset(x = 1.dp, y = 1.dp)
-                        .size(12.dp)
+                        .size(dims.avatarMedium * 0.28f)
                         .clip(CircleShape)
                         .background(Color.White)
                         .padding(1.5.dp)
@@ -139,7 +144,7 @@ fun ChatItemRow(
             }
         }
 
-        Spacer(modifier = Modifier.width(12.dp))
+        Spacer(modifier = Modifier.width(dims.itemSpacing * 1.5f))
 
         Column(modifier = Modifier.weight(1f)) {
             Row(
@@ -151,13 +156,13 @@ fun ChatItemRow(
                     Text(
                         text = contact.displayName.ifBlank { "Contacto" },
                         fontWeight = FontWeight.SemiBold,
-                        fontSize = 15.sp,
+                        fontSize = dims.bodySize,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
                     Text(
                         text = contact.phoneNumber,
-                        fontSize = 12.sp,
+                        fontSize = dims.smallSize,
                         color = WhatsAppTeal,
                         fontWeight = FontWeight.Medium,
                         maxLines = 1,
@@ -169,7 +174,7 @@ fun ChatItemRow(
                         .format(Date(contact.lastMessageTime))
                     Text(
                         text = timeStr,
-                        fontSize = 11.sp,
+                        fontSize = dims.tinySize,
                         color = if (contact.unreadCount > 0) WhatsAppGreenAccent else MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
@@ -184,7 +189,7 @@ fun ChatItemRow(
             ) {
                 Text(
                     text = contact.lastMessageText ?: "Toca para chatear",
-                    fontSize = 13.sp,
+                    fontSize = dims.smallSize,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -199,7 +204,7 @@ fun ChatItemRow(
                     ) {
                         Text(
                             text = contact.unreadCount.toString(),
-                            fontSize = 10.sp,
+                            fontSize = dims.tinySize,
                             fontWeight = FontWeight.Bold,
                             color = Color.Black
                         )

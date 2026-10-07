@@ -9,7 +9,9 @@ class ChatMeshRepository(
     private val contactDao: ContactDao,
     private val messageDao: MessageDao,
     private val meshNodeDao: MeshNodeDao,
-    private val callDao: CallDao
+    private val callDao: CallDao,
+    private val storyDao: StoryDao,
+    private val storySeenDao: StorySeenDao
 ) {
     val userProfileFlow: Flow<UserProfile?> = userDao.getUserProfileFlow()
     val allContactsFlow: Flow<List<ContactEntity>> = contactDao.getAllContactsFlow()
@@ -18,6 +20,24 @@ class ChatMeshRepository(
         contactDao.getOnlineContactsFlow(activeThreshold)
     val allMeshNodesFlow: Flow<List<MeshNodeEntity>> = meshNodeDao.getAllNodesFlow()
     val allCallsFlow: Flow<List<CallEntity>> = callDao.getAllCallsFlow()
+
+    fun getActiveStoriesFlow(now: Long = System.currentTimeMillis()): Flow<List<StoryEntity>> =
+        storyDao.getActiveStoriesFlow(now)
+    suspend fun saveStory(story: StoryEntity) = storyDao.insertOrUpdate(story)
+    suspend fun getStory(storyId: String): StoryEntity? = storyDao.getStoryById(storyId)
+    suspend fun getStoriesByAuthor(phone: String, now: Long = System.currentTimeMillis()): List<StoryEntity> =
+        storyDao.getStoriesByAuthor(phone, now)
+    suspend fun markStoryViewed(storyId: String, at: Long = System.currentTimeMillis()) =
+        storyDao.markAsViewed(storyId, at)
+    suspend fun deleteExpiredStories(now: Long = System.currentTimeMillis()) =
+        storyDao.deleteExpired(now)
+    suspend fun deleteStory(storyId: String) {
+        storyDao.deleteStory(storyId)
+        storySeenDao.deleteForStory(storyId)
+    }
+    suspend fun saveStorySeen(seen: StorySeenEntity) = storySeenDao.insert(seen)
+    fun getStoryViewersFlow(storyId: String): Flow<List<StorySeenEntity>> =
+        storySeenDao.getViewersFlow(storyId)
 
     suspend fun getUserProfile(): UserProfile? = userDao.getUserProfile()
     suspend fun saveUserProfile(profile: UserProfile) = userDao.insertOrUpdate(profile)

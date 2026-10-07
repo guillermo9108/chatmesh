@@ -12,6 +12,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.mesh.SimCardInfo
+import com.example.ui.theme.LocalAppDimensions
 import com.example.ui.theme.WhatsAppTeal
 
 @Composable
@@ -20,6 +21,7 @@ fun SimConfigDialog(
     onSaveNumber: (String) -> Unit,
     onDismiss: () -> Unit
 ) {
+    val dims = LocalAppDimensions.current
     var phoneNumberInput by remember { mutableStateOf(simInfo.phoneNumber.orEmpty()) }
 
     AlertDialog(

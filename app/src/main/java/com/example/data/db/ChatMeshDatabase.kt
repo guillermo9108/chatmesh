@@ -13,9 +13,11 @@ import com.example.data.entity.*
         ContactEntity::class,
         MeshNodeEntity::class,
         UserProfile::class,
-        CallEntity::class
+        CallEntity::class,
+        StoryEntity::class,
+        StorySeenEntity::class
     ],
-    version = 1,
+    version = 2,
     exportSchema = false
 )
 abstract class ChatMeshDatabase : RoomDatabase() {
@@ -24,6 +26,8 @@ abstract class ChatMeshDatabase : RoomDatabase() {
     abstract fun meshNodeDao(): MeshNodeDao
     abstract fun userDao(): UserDao
     abstract fun callDao(): CallDao
+    abstract fun storyDao(): StoryDao
+    abstract fun storySeenDao(): StorySeenDao
 
     companion object {
         @Volatile

@@ -20,6 +20,7 @@ import androidx.compose.ui.unit.sp
 import com.example.data.entity.CallEntity
 import com.example.data.entity.ContactEntity
 import com.example.ui.components.UserAvatar
+import com.example.ui.theme.LocalAppDimensions
 import com.example.ui.theme.WhatsAppTeal
 import java.text.SimpleDateFormat
 import java.util.*
@@ -30,11 +31,13 @@ fun CallsTab(
     onStartCall: (ContactEntity, Boolean) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val dims = LocalAppDimensions.current
+
     if (calls.isEmpty()) {
         Box(
             modifier = modifier
                 .fillMaxSize()
-                .padding(32.dp),
+                .padding(dims.screenPadding * 2),
             contentAlignment = Alignment.Center
         ) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -42,18 +45,18 @@ fun CallsTab(
                     Icons.Default.Phone,
                     contentDescription = null,
                     tint = WhatsAppTeal.copy(alpha = 0.5f),
-                    modifier = Modifier.size(64.dp)
+                    modifier = Modifier.size(dims.avatarCall * 0.6f)
                 )
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(dims.itemSpacing * 2))
                 Text(
                     text = "No hay llamadas recientes",
                     fontWeight = FontWeight.Bold,
-                    fontSize = 16.sp
+                    fontSize = dims.titleSize
                 )
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(dims.itemSpacing))
                 Text(
                     text = "Para llamar por voz o video a través de WiFi Direct sin internet, abre un chat y toca el ícono de llamada.",
-                    fontSize = 13.sp,
+                    fontSize = dims.subtitleSize,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = androidx.compose.ui.text.style.TextAlign.Center
                 )
@@ -77,7 +80,7 @@ fun CallsTab(
                     }
                 )
                 HorizontalDivider(
-                    modifier = Modifier.padding(start = 76.dp),
+                    modifier = Modifier.padding(start = dims.avatarMedium + dims.screenPadding * 1.5f),
                     color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
                 )
             }
@@ -90,25 +93,27 @@ fun CallItemRow(
     call: CallEntity,
     onCallClick: () -> Unit
 ) {
+    val dims = LocalAppDimensions.current
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 12.dp),
+            .padding(horizontal = dims.screenPadding, vertical = dims.listItemPadding),
         verticalAlignment = Alignment.CenterVertically
     ) {
         UserAvatar(
             avatarUri = null,
             displayName = call.contactName.ifBlank { call.contactPhone },
-            size = 48.dp
+            size = dims.avatarMedium
         )
 
-        Spacer(modifier = Modifier.width(16.dp))
+        Spacer(modifier = Modifier.width(dims.itemSpacing * 1.5f))
 
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = call.contactName.ifBlank { call.contactPhone },
                 fontWeight = FontWeight.SemiBold,
-                fontSize = 16.sp
+                fontSize = dims.bodySize
             )
             Spacer(modifier = Modifier.height(2.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -124,7 +129,7 @@ fun CallItemRow(
                 val dateStr = SimpleDateFormat("d MMM, h:mm a", Locale.getDefault()).format(Date(call.timestamp))
                 Text(
                     text = "$dateStr (${call.durationSeconds}s)",
-                    fontSize = 12.sp,
+                    fontSize = dims.smallSize,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }

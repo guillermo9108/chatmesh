@@ -25,6 +25,7 @@ import androidx.compose.ui.unit.sp
 import com.example.data.entity.MeshNodeEntity
 import com.example.mesh.MeshEngineState
 import com.example.mesh.MeshTransport
+import com.example.ui.theme.LocalAppDimensions
 import com.example.ui.theme.WhatsAppGreenAccent
 import com.example.ui.theme.WhatsAppTeal
 
@@ -38,6 +39,7 @@ fun MeshNodesTab(
     onStopHotspot: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
+    val dims = LocalAppDimensions.current
     val context = LocalContext.current
     val isLanActive = engineState.transport == MeshTransport.WIFI_LAN
     val isHotspotActive = engineState.isHotspotActive || engineState.transport == MeshTransport.HOTSPOT
@@ -52,7 +54,7 @@ fun MeshNodesTab(
     LazyColumn(
         modifier = modifier
             .fillMaxSize()
-            .padding(16.dp)
+            .padding(dims.screenPadding)
             .testTag("mesh_nodes_list")
     ) {
         // 1. Tarjeta Resumen Modo Activo

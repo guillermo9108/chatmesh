@@ -29,7 +29,9 @@ class ChatMeshViewModel(application: Application) : AndroidViewModel(application
         database.contactDao(),
         database.messageDao(),
         database.meshNodeDao(),
-        database.callDao()
+        database.callDao(),
+        database.storyDao(),
+        database.storySeenDao()
     )
 
     private val meshEngine: WiFiMeshEngine =
@@ -91,6 +93,21 @@ class ChatMeshViewModel(application: Application) : AndroidViewModel(application
 
     val calls: StateFlow<List<CallEntity>> = repository.allCallsFlow
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val storiesUpdated: StateFlow<Long> = meshEngine.storiesUpdated
+
+    val allActiveStories: StateFlow<List<StoryEntity>> = combine(
+        repository.getActiveStoriesFlow(),
+        storiesUpdated
+    ) { stories, _ ->
+        stories
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val storiesGrouped: StateFlow<Map<String, List<StoryEntity>>> = allActiveStories
+        .map { stories ->
+            stories.groupBy { it.authorPhone }
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyMap())
 
     val engineState: StateFlow<MeshEngineState> = meshEngine.engineState
 
@@ -499,4 +516,26 @@ class ChatMeshViewModel(application: Application) : AndroidViewModel(application
     fun sendAudioMessage(base64Audio: String, durationSeconds: Int) { sendAudioVoiceMessage(base64Audio, durationSeconds) }
     fun sendUserStatus(status: String) { _selectedContact.value?.let { meshEngine.sendUserStatus(it.phoneNumber, status) } }
     fun sendUserStatus(phoneNumber: String, status: String) { meshEngine.sendUserStatus(phoneNumber, status) }
+
+    fun publishTextStory(text: String, backgroundColor: Int) {
+        meshEngine.publishStory("TEXT", text, null, backgroundColor)
+    }
+
+    fun publishImageStory(base64: String, caption: String) {
+        meshEngine.publishStory("IMAGE", caption, base64, 0)
+    }
+
+    fun markStoryAsViewed(storyId: String) {
+        val story = allActiveStories.value.firstOrNull { it.storyId == storyId }
+        val author = story?.authorPhone ?: return
+        meshEngine.sendStoryView(storyId, author)
+    }
+
+    fun deleteStory(storyId: String) {
+        meshEngine.deleteStory(storyId)
+    }
+
+    fun getStoryViewersFlow(storyId: String): Flow<List<StorySeenEntity>> {
+        return repository.getStoryViewersFlow(storyId)
+    }
 }

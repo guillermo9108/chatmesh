@@ -39,6 +39,7 @@ import com.example.data.entity.MessageEntity
 import com.example.ui.components.AddContactDialog
 import com.example.ui.components.ChatBubble
 import androidx.compose.ui.text.style.TextOverflow
+import com.example.ui.theme.LocalAppDimensions
 import com.example.ui.theme.WhatsAppChatBgLight
 import com.example.ui.theme.WhatsAppGreenAccent
 import com.example.ui.theme.WhatsAppTeal
@@ -65,7 +66,7 @@ fun ChatDetailScreen(
     modifier: Modifier = Modifier
 ) {
     BackHandler { onBackClick() }
-
+    val dims = LocalAppDimensions.current
     val context = LocalContext.current
     var inputText by remember { mutableStateOf("") }
     var showAttachmentSheet by remember { mutableStateOf(false) }
@@ -146,14 +147,14 @@ fun ChatDetailScreen(
                         UserAvatar(
                             avatarUri = contact.avatarUri,
                             displayName = contact.displayName.ifBlank { contact.phoneNumber },
-                            size = 36.dp
+                            size = dims.avatarSmall
                         )
-                        Spacer(modifier = Modifier.width(8.dp))
+                        Spacer(modifier = Modifier.width(dims.itemSpacing))
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
                                 text = contact.displayName.ifBlank { "Contacto" },
                                 color = Color.White,
-                                fontSize = 15.sp,
+                                fontSize = dims.bodySize,
                                 fontWeight = FontWeight.Bold,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
@@ -171,7 +172,7 @@ fun ChatDetailScreen(
                                 } else {
                                     Color.White.copy(alpha = 0.85f)
                                 },
-                                fontSize = 11.sp,
+                                fontSize = dims.tinySize,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
@@ -372,7 +373,7 @@ fun ChatDetailScreen(
                                 } else {
                                     IconButton(
                                         onClick = { showAttachmentSheet = true },
-                                        modifier = Modifier.size(36.dp)
+                                        modifier = Modifier.size(dims.iconButtonSize)
                                     ) {
                                         Icon(
                                             Icons.Default.AttachFile,
@@ -390,7 +391,7 @@ fun ChatDetailScreen(
                                             Text(
                                                 "Mensaje",
                                                 color = Color.Gray,
-                                                fontSize = 15.sp
+                                                fontSize = dims.chatBubbleSize
                                             )
                                         },
                                         modifier = Modifier
@@ -410,7 +411,7 @@ fun ChatDetailScreen(
                                                 PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
                                             )
                                         },
-                                        modifier = Modifier.size(36.dp)
+                                        modifier = Modifier.size(dims.iconButtonSize)
                                     ) {
                                         Icon(
                                             Icons.Default.CameraAlt,
@@ -422,7 +423,7 @@ fun ChatDetailScreen(
                             }
                         }
 
-                        Spacer(modifier = Modifier.width(6.dp))
+                        Spacer(modifier = Modifier.width(dims.itemSpacing / 2))
 
                         // Mic / Send floating circle button
                         FloatingActionButton(
@@ -450,7 +451,7 @@ fun ChatDetailScreen(
                             contentColor = Color.White,
                             shape = CircleShape,
                             modifier = Modifier
-                                .size(48.dp)
+                                .size(dims.sendButtonSize)
                                 .testTag("send_or_mic_button")
                         ) {
                             if (inputText.isNotBlank()) {

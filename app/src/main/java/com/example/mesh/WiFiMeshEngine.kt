@@ -24,6 +24,8 @@ import com.example.data.entity.CallEntity
 import com.example.data.entity.ContactEntity
 import com.example.data.entity.MeshNodeEntity
 import com.example.data.entity.MessageEntity
+import com.example.data.entity.StoryEntity
+import com.example.data.entity.StorySeenEntity
 import com.example.data.repository.ChatMeshRepository
 import com.example.util.CallRingtonePlayer
 import com.example.util.NotificationHelper
@@ -80,6 +82,9 @@ class WiFiMeshEngine(
 
     private val _engineState = MutableStateFlow(MeshEngineState())
     val engineState: StateFlow<MeshEngineState> = _engineState.asStateFlow()
+
+    private val _storiesUpdated = MutableStateFlow(0L)
+    val storiesUpdated: StateFlow<Long> = _storiesUpdated.asStateFlow()
 
     private var p2pManager: WifiP2pManager? = null
     private var p2pChannel: WifiP2pManager.Channel? = null
@@ -141,6 +146,105 @@ class WiFiMeshEngine(
     }
 
     fun getVideoQuality(): VideoQuality = videoQuality
+
+    fun publishStory(mediaType: String, content: String, mediaBase64: String?, backgroundColor: Int) {
+        val now = System.currentTimeMillis()
+        val sId = UUID.randomUUID().toString()
+        val exp = now + 24 * 60 * 60 * 1000L
+        val story = StoryEntity(
+            storyId = sId,
+            authorPhone = _engineState.value.myPhoneNumber,
+            authorName = _engineState.value.myNickname.ifBlank { _engineState.value.myPhoneNumber },
+            authorAvatarUri = _engineState.value.myAvatarUri,
+            mediaType = mediaType,
+            content = content,
+            mediaBase64 = mediaBase64,
+            backgroundColor = backgroundColor,
+            createdAt = now,
+            expiresAt = exp,
+            viewedByMe = true,
+            viewedAt = now,
+            isMine = true
+        )
+        scope.launch(Dispatchers.IO) {
+            repository.saveStory(story)
+            _storiesUpdated.value = now
+            Log.i(TAG, "STORY_PUBLISH creada localmente id=$sId, exp=$exp")
+
+            val packet = MeshPacket(
+                packetType = "STORY_PUBLISH",
+                sourceNodeId = _engineState.value.myNodeId,
+                sourcePhone = _engineState.value.myPhoneNumber,
+                sourceName = _engineState.value.myNickname.ifBlank { "Usuario" },
+                sourceSsid = _engineState.value.ssid,
+                sourceAvatar = _engineState.value.myAvatarUri,
+                destinationPhone = "BROADCAST",
+                storyId = sId,
+                storyMediaType = mediaType,
+                storyContent = content,
+                storyMediaBase64 = mediaBase64,
+                storyBackgroundColor = backgroundColor,
+                storyExpiresAt = exp,
+                storyAuthorName = _engineState.value.myNickname.ifBlank { _engineState.value.myPhoneNumber },
+                storyAuthorAvatarUri = _engineState.value.myAvatarUri
+            )
+
+            transmitMeshPacketSync(packet)
+            for (pPhone in peerIpByPhone.keys) {
+                try {
+                    val pPacket = packet.copy(destinationPhone = pPhone)
+                    transmitMeshPacketSync(pPacket)
+                } catch (_: Exception) {}
+            }
+        }
+    }
+
+    fun sendStoryView(storyId: String, authorPhone: String) {
+        scope.launch(Dispatchers.IO) {
+            val now = System.currentTimeMillis()
+            repository.markStoryViewed(storyId, now)
+            _storiesUpdated.value = now
+
+            if (authorPhone == _engineState.value.myPhoneNumber) return@launch
+            Log.i(TAG, "STORY_VIEW enviando para storyId=$storyId a autor=$authorPhone")
+            val packet = MeshPacket(
+                packetType = "STORY_VIEW",
+                sourceNodeId = _engineState.value.myNodeId,
+                sourcePhone = _engineState.value.myPhoneNumber,
+                sourceName = _engineState.value.myNickname.ifBlank { "Usuario" },
+                sourceSsid = _engineState.value.ssid,
+                destinationPhone = authorPhone,
+                storyId = storyId
+            )
+            transmitMeshPacketSync(packet)
+        }
+    }
+
+    fun deleteStory(storyId: String) {
+        scope.launch(Dispatchers.IO) {
+            val now = System.currentTimeMillis()
+            repository.deleteStory(storyId)
+            _storiesUpdated.value = now
+            Log.i(TAG, "STORY_DELETE transmitiendo para storyId=$storyId")
+
+            val packet = MeshPacket(
+                packetType = "STORY_DELETE",
+                sourceNodeId = _engineState.value.myNodeId,
+                sourcePhone = _engineState.value.myPhoneNumber,
+                sourceName = _engineState.value.myNickname.ifBlank { "Usuario" },
+                sourceSsid = _engineState.value.ssid,
+                destinationPhone = "BROADCAST",
+                storyId = storyId
+            )
+            transmitMeshPacketSync(packet)
+            for (pPhone in peerIpByPhone.keys) {
+                try {
+                    val pPacket = packet.copy(destinationPhone = pPhone)
+                    transmitMeshPacketSync(pPacket)
+                } catch (_: Exception) {}
+            }
+        }
+    }
 
     private val storeAndForwardQueue = ConcurrentHashMap<String, PendingRetry>()
     private val receivedPacketUuids = ConcurrentHashMap.newKeySet<String>()
@@ -231,6 +335,14 @@ class WiFiMeshEngine(
         startRealTcpMeshServer()
         startRealUdpBeaconListener()
         startMeshMaintenanceLoop()
+
+        // Limpieza periódica de historias caducadas (24h)
+        scope.launch {
+            while (isActive) {
+                delay(30 * 60 * 1000L)
+                try { repository.deleteExpiredStories() } catch (_: Exception) {}
+            }
+        }
 
         // Cada dispositivo decide si debe ser GO autónomo basándose en su número
         // de teléfono. El "mayor" crea grupo autónomo; el "menor" espera para
@@ -1502,6 +1614,55 @@ class WiFiMeshEngine(
                         relayPacket(packet)
                     }
                 }
+                "STORY_PUBLISH" -> {
+                    val sId = packet.storyId
+                    if (!sId.isNullOrBlank()) {
+                        Log.i(TAG, "STORY_PUBLISH recibido id=$sId de ${packet.sourcePhone}")
+                        val now = System.currentTimeMillis()
+                        val exp = if (packet.storyExpiresAt > 0L) packet.storyExpiresAt else (now + 24 * 60 * 60 * 1000L)
+                        if (exp > now) {
+                            val story = StoryEntity(
+                                storyId = sId,
+                                authorPhone = packet.sourcePhone,
+                                authorName = packet.storyAuthorName ?: packet.sourceName.ifBlank { packet.sourcePhone },
+                                authorAvatarUri = packet.storyAuthorAvatarUri ?: packet.sourceAvatar,
+                                mediaType = packet.storyMediaType ?: "TEXT",
+                                content = packet.storyContent ?: "",
+                                mediaBase64 = packet.storyMediaBase64,
+                                backgroundColor = packet.storyBackgroundColor,
+                                createdAt = packet.timestamp,
+                                expiresAt = exp,
+                                viewedByMe = false,
+                                viewedAt = 0L,
+                                isMine = false
+                            )
+                            repository.saveStory(story)
+                            _storiesUpdated.value = now
+                        }
+                    }
+                }
+                "STORY_VIEW" -> {
+                    val sId = packet.storyId
+                    if (!sId.isNullOrBlank()) {
+                        Log.i(TAG, "STORY_VIEW recibido para storyId=$sId de viewer=${packet.sourcePhone}")
+                        val seen = StorySeenEntity(
+                            storyId = sId,
+                            viewerPhone = packet.sourcePhone,
+                            viewerName = packet.sourceName.ifBlank { packet.sourcePhone },
+                            seenAt = packet.timestamp
+                        )
+                        repository.saveStorySeen(seen)
+                        _storiesUpdated.value = System.currentTimeMillis()
+                    }
+                }
+                "STORY_DELETE" -> {
+                    val sId = packet.storyId
+                    if (!sId.isNullOrBlank()) {
+                        Log.i(TAG, "STORY_DELETE recibido id=$sId")
+                        repository.deleteStory(sId)
+                        _storiesUpdated.value = System.currentTimeMillis()
+                    }
+                }
             }
         }
     }
@@ -1511,7 +1672,6 @@ class WiFiMeshEngine(
             packet.sourceName != "Nodo" &&
             !packet.sourceName.startsWith("ChatMesh_")
         ) packet.sourceName else packet.sourcePhone
-
         val contact = repository.getContact(packet.sourcePhone)
         if (contact == null) {
             repository.insertContact(
@@ -1552,7 +1712,7 @@ class WiFiMeshEngine(
     }
 
     private suspend fun relayPacket(packet: MeshPacket) {
-        if (packet.packetType == "VIDEO_FRAME") return
+        if (packet.packetType == "VIDEO_FRAME" || packet.packetType.startsWith("STORY_")) return
         val myId = _engineState.value.myNodeId
         if (packet.visitedNodeIds.contains(myId) || packet.hopCount >= packet.maxHops) return
         val relayed = packet.copy(

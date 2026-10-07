@@ -25,6 +25,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.entity.ContactEntity
 import com.example.ui.components.UserAvatar
+import com.example.ui.theme.LocalAppDimensions
 import com.example.ui.theme.WhatsAppGreenAccent
 import com.example.ui.theme.WhatsAppTeal
 
@@ -37,6 +38,8 @@ fun ContactsTab(
     onInviteContact: (ContactEntity) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val dims = LocalAppDimensions.current
+
     val filteredContacts = remember(contacts, searchQuery) {
         if (searchQuery.isBlank()) {
             contacts
@@ -57,14 +60,14 @@ fun ContactsTab(
             color = MaterialTheme.colorScheme.surface,
             modifier = Modifier.fillMaxWidth()
         ) {
-            Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) {
+            Column(modifier = Modifier.padding(horizontal = dims.screenPadding, vertical = dims.itemSpacing)) {
                 OutlinedTextField(
                     value = searchQuery,
                     onValueChange = onSearchQueryChange,
                     placeholder = {
                         Text(
                             "Buscar contactos por nombre o número...",
-                            fontSize = 14.sp,
+                            fontSize = dims.subtitleSize,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
@@ -199,33 +202,35 @@ fun ContactItemRow(
     onClick: () -> Unit,
     onConnect: () -> Unit
 ) {
+    val dims = LocalAppDimensions.current
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 8.dp),
+            .padding(horizontal = dims.screenPadding, vertical = dims.listItemPadding),
         verticalAlignment = Alignment.CenterVertically
     ) {
         UserAvatar(
             avatarUri = contact.avatarUri,
             displayName = contact.displayName.ifBlank { contact.phoneNumber },
-            size = 42.dp
+            size = dims.avatarMedium
         )
 
-        Spacer(modifier = Modifier.width(12.dp))
+        Spacer(modifier = Modifier.width(dims.itemSpacing * 1.5f))
 
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = contact.displayName.ifBlank { "Contacto" },
                 fontWeight = FontWeight.SemiBold,
-                fontSize = 15.sp,
+                fontSize = dims.bodySize,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
             Spacer(modifier = Modifier.height(2.dp))
             Text(
                 text = contact.phoneNumber,
-                fontSize = 12.sp,
+                fontSize = dims.smallSize,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
@@ -250,7 +255,7 @@ fun ContactItemRow(
                     Spacer(modifier = Modifier.width(4.dp))
                     Text(
                         text = "En Malla",
-                        fontSize = 10.sp,
+                        fontSize = dims.tinySize,
                         fontWeight = FontWeight.Bold,
                         color = WhatsAppTeal
                     )

@@ -18,10 +18,15 @@ import com.example.ui.theme.MyApplicationTheme
 import com.example.ui.viewmodel.ChatMeshViewModel
 import com.example.util.CallRingtonePlayer
 
+import androidx.compose.material3.windowsizeclass.ExperimentalMaterial3WindowSizeClassApi
+import androidx.compose.material3.windowsizeclass.calculateWindowSizeClass
+import com.example.ui.theme.ProvideAppDimensions
+
 class MainActivity : ComponentActivity() {
 
     private val viewModel: ChatMeshViewModel by viewModels()
 
+    @OptIn(ExperimentalMaterial3WindowSizeClassApi::class)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -32,7 +37,9 @@ class MainActivity : ComponentActivity() {
             db.contactDao(),
             db.messageDao(),
             db.meshNodeDao(),
-            db.callDao()
+            db.callDao(),
+            db.storyDao(),
+            db.storySeenDao()
         )
         MeshEngineHolder.init(applicationContext, repo)
 
@@ -44,9 +51,12 @@ class MainActivity : ComponentActivity() {
         handleIntent(intent)
 
         setContent {
-            MyApplicationTheme {
-                Surface(modifier = Modifier.fillMaxSize()) {
-                    MainAppScreen(viewModel = viewModel)
+            val windowSizeClass = calculateWindowSizeClass(this)
+            ProvideAppDimensions(windowSizeClass) {
+                MyApplicationTheme {
+                    Surface(modifier = Modifier.fillMaxSize()) {
+                        MainAppScreen(viewModel = viewModel)
+                    }
                 }
             }
         }

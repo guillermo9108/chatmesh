@@ -17,6 +17,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.mesh.VideoQuality
+import com.example.ui.theme.LocalAppDimensions
 import com.example.ui.theme.WhatsAppGreenAccent
 import com.example.ui.theme.WhatsAppTeal
 
@@ -35,9 +36,11 @@ fun WhatsAppTopBar(
     onShareAppClick: () -> Unit = {},
     currentVideoQuality: VideoQuality = VideoQuality.MEDIUM,
     unreadChatsCount: Int,
+    unreadStoriesCount: Int = 0,
     connectedNodesCount: Int,
     ssidName: String
 ) {
+    val dims = LocalAppDimensions.current
     var menuExpanded by remember { mutableStateOf(false) }
 
     Column(
@@ -51,14 +54,14 @@ fun WhatsAppTopBar(
                     Text(
                         text = "ChatMesh",
                         color = Color.White,
-                        fontSize = 19.sp,
+                        fontSize = dims.titleSize,
                         fontWeight = FontWeight.Bold
                     )
                     if (ssidName.isNotBlank()) {
                         Text(
                             text = ssidName,
                             color = Color.White.copy(alpha = 0.85f),
-                            fontSize = 11.sp,
+                            fontSize = dims.smallSize,
                             maxLines = 1
                         )
                     }
@@ -191,8 +194,8 @@ fun WhatsAppTopBar(
             }
         )
 
-        // Tab bar optimizada para pantallas pequeñas / baja resolución
-        val tabs = listOf("CHATS", "CONTACTOS", "NODOS", "LLAMADAS")
+        // Tab bar adaptativa scrollable con las 5 pestañas
+        val tabs = listOf("CHATS", "CONTACTOS", "ESTADOS", "NODOS MESH", "LLAMADAS")
         ScrollableTabRow(
             selectedTabIndex = selectedTabIndex,
             containerColor = WhatsAppTeal,
@@ -215,11 +218,11 @@ fun WhatsAppTopBar(
                     text = {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                            modifier = Modifier.padding(dims.tabPadding)
                         ) {
                             Text(
                                 text = title,
-                                fontSize = 12.sp,
+                                fontSize = dims.tabFontSize,
                                 fontWeight = if (selectedTabIndex == index) FontWeight.Bold else FontWeight.Medium,
                                 color = if (selectedTabIndex == index) Color.White else Color.White.copy(alpha = 0.7f),
                                 maxLines = 1
@@ -234,12 +237,27 @@ fun WhatsAppTopBar(
                                 ) {
                                     Text(
                                         text = unreadChatsCount.toString(),
-                                        fontSize = 10.sp,
+                                        fontSize = dims.tinySize,
                                         fontWeight = FontWeight.Bold,
                                         color = Color.Black
                                     )
                                 }
-                            } else if (index == 2 && connectedNodesCount > 0) {
+                            } else if (index == 2 && unreadStoriesCount > 0) {
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Box(
+                                    modifier = Modifier
+                                        .clip(CircleShape)
+                                        .background(WhatsAppGreenAccent)
+                                        .padding(horizontal = 5.dp, vertical = 1.dp)
+                                ) {
+                                    Text(
+                                        text = unreadStoriesCount.toString(),
+                                        fontSize = dims.tinySize,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color.Black
+                                    )
+                                }
+                            } else if (index == 3 && connectedNodesCount > 0) {
                                 Spacer(modifier = Modifier.width(4.dp))
                                 Box(
                                     modifier = Modifier
@@ -249,7 +267,7 @@ fun WhatsAppTopBar(
                                 ) {
                                     Text(
                                         text = connectedNodesCount.toString(),
-                                        fontSize = 10.sp,
+                                        fontSize = dims.tinySize,
                                         fontWeight = FontWeight.Bold,
                                         color = WhatsAppTeal
                                     )

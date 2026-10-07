@@ -32,6 +32,7 @@ import com.example.data.entity.UserProfile
 import com.example.ui.components.AvatarPresetItem
 import com.example.ui.components.AvatarPresets
 import com.example.ui.components.UserAvatar
+import com.example.ui.theme.LocalAppDimensions
 import com.example.ui.theme.WhatsAppGreenAccent
 import com.example.ui.theme.WhatsAppTeal
 import java.io.File
@@ -43,6 +44,7 @@ fun ProfileDialog(
     onSaveProfile: (String, String, String?) -> Unit,
     onDismiss: () -> Unit
 ) {
+    val dims = LocalAppDimensions.current
     val context = LocalContext.current
     var nickname by remember { mutableStateOf(userProfile?.nickname ?: "Usuario") }
     var phone by remember { mutableStateOf(userProfile?.phoneNumber ?: "+53...") }

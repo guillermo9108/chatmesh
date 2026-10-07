@@ -33,7 +33,15 @@ data class MeshPacket(
     val videoFrameBase64: String? = null,
     val hotspotSsid: String? = null,
     val hotspotPassword: String? = null,
-    val hotspotRequesterPhone: String? = null
+    val hotspotRequesterPhone: String? = null,
+    val storyId: String? = null,
+    val storyMediaType: String? = null,
+    val storyContent: String? = null,
+    val storyMediaBase64: String? = null,
+    val storyBackgroundColor: Int = 0,
+    val storyExpiresAt: Long = 0L,
+    val storyAuthorName: String? = null,
+    val storyAuthorAvatarUri: String? = null
 ) {
     fun toJson(): String {
         val obj = JSONObject()
@@ -68,6 +76,14 @@ data class MeshPacket(
         if (hotspotSsid != null) obj.put("hotspotSsid", hotspotSsid)
         if (hotspotPassword != null) obj.put("hotspotPassword", hotspotPassword)
         if (hotspotRequesterPhone != null) obj.put("hotspotRequesterPhone", hotspotRequesterPhone)
+        if (storyId != null) obj.put("storyId", storyId)
+        if (storyMediaType != null) obj.put("storyMediaType", storyMediaType)
+        if (storyContent != null) obj.put("storyContent", storyContent)
+        if (storyMediaBase64 != null) obj.put("storyMediaBase64", storyMediaBase64)
+        if (storyBackgroundColor != 0) obj.put("storyBackgroundColor", storyBackgroundColor)
+        if (storyExpiresAt != 0L) obj.put("storyExpiresAt", storyExpiresAt)
+        if (storyAuthorName != null) obj.put("storyAuthorName", storyAuthorName)
+        if (storyAuthorAvatarUri != null) obj.put("storyAuthorAvatarUri", storyAuthorAvatarUri)
         return obj.toString()
     }
 
@@ -111,7 +127,15 @@ data class MeshPacket(
                     videoFrameBase64 = if (obj.has("videoFrameBase64")) obj.getString("videoFrameBase64") else null,
                     hotspotSsid = if (obj.has("hotspotSsid")) obj.getString("hotspotSsid") else null,
                     hotspotPassword = if (obj.has("hotspotPassword")) obj.getString("hotspotPassword") else null,
-                    hotspotRequesterPhone = if (obj.has("hotspotRequesterPhone")) obj.getString("hotspotRequesterPhone") else null
+                    hotspotRequesterPhone = if (obj.has("hotspotRequesterPhone")) obj.getString("hotspotRequesterPhone") else null,
+                    storyId = if (obj.has("storyId")) obj.getString("storyId") else null,
+                    storyMediaType = if (obj.has("storyMediaType")) obj.getString("storyMediaType") else null,
+                    storyContent = if (obj.has("storyContent")) obj.getString("storyContent") else null,
+                    storyMediaBase64 = if (obj.has("storyMediaBase64")) obj.getString("storyMediaBase64") else null,
+                    storyBackgroundColor = obj.optInt("storyBackgroundColor", 0),
+                    storyExpiresAt = obj.optLong("storyExpiresAt", 0L),
+                    storyAuthorName = if (obj.has("storyAuthorName")) obj.getString("storyAuthorName") else null,
+                    storyAuthorAvatarUri = if (obj.has("storyAuthorAvatarUri")) obj.getString("storyAuthorAvatarUri") else null
                 )
             } catch (e: Exception) {
                 null

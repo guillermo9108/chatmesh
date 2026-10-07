@@ -25,6 +25,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.mesh.MeshEngineState
 import com.example.mesh.MeshTransport
+import com.example.ui.theme.LocalAppDimensions
 import com.example.ui.theme.WhatsAppGreenAccent
 import com.example.ui.theme.WhatsAppTeal
 
@@ -50,6 +51,7 @@ fun MeshSettingsDialog(
     isBleNegotiatingGo: Boolean = false,
     onDismiss: () -> Unit
 ) {
+    val dims = LocalAppDimensions.current
     val scrollState = rememberScrollState()
     val context = LocalContext.current
 

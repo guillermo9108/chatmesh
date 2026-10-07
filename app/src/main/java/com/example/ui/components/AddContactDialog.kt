@@ -11,6 +11,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.ui.theme.LocalAppDimensions
 import com.example.ui.theme.WhatsAppTeal
 
 @Composable
@@ -20,6 +21,7 @@ fun AddContactDialog(
     onAddContact: (String, String) -> Unit,
     onDismiss: () -> Unit
 ) {
+    val dims = LocalAppDimensions.current
     var name by remember { mutableStateOf(initialName) }
     var phone by remember { mutableStateOf(initialPhone) }
     var errorMsg by remember { mutableStateOf<String?>(null) }

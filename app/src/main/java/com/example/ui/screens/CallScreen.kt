@@ -28,6 +28,7 @@ import androidx.compose.ui.unit.sp
 import com.example.data.entity.ContactEntity
 import com.example.mesh.MeshEngineState
 import com.example.ui.components.UserAvatar
+import com.example.ui.theme.LocalAppDimensions
 import com.example.ui.theme.WhatsAppGreenAccent
 import com.example.ui.theme.WhatsAppTeal
 
@@ -46,6 +47,7 @@ fun CallScreen(
     onDeclineWithMessage: ((String) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
+    val dims = LocalAppDimensions.current
     var showQuickMessagesSheet by remember { mutableStateOf(false) }
 
     val infiniteTransition = rememberInfiniteTransition(label = "pulse")
@@ -181,20 +183,20 @@ fun CallScreen(
 
                 Text(
                     text = contact.displayName.ifBlank { contact.phoneNumber },
-                    fontSize = 28.sp,
+                    fontSize = dims.callTitleSize,
                     fontWeight = FontWeight.Bold,
                     color = Color.White
                 )
 
-                Spacer(modifier = Modifier.height(6.dp))
+                Spacer(modifier = Modifier.height(4.dp))
 
                 Text(
                     text = contact.phoneNumber,
-                    fontSize = 16.sp,
+                    fontSize = dims.subtitleSize,
                     color = Color.White.copy(alpha = 0.75f)
                 )
 
-                Spacer(modifier = Modifier.height(14.dp))
+                Spacer(modifier = Modifier.height(dims.itemSpacing))
 
                 val statusText = when {
                     engineState.isIncomingCall -> {
@@ -210,7 +212,7 @@ fun CallScreen(
 
                 Text(
                     text = statusText,
-                    fontSize = 15.sp,
+                    fontSize = dims.bodySize,
                     fontWeight = FontWeight.Medium,
                     color = if (engineState.isIncomingCall) WhatsAppGreenAccent else Color.White.copy(alpha = 0.85f)
                 )
@@ -220,14 +222,14 @@ fun CallScreen(
             Box(
                 contentAlignment = Alignment.Center,
                 modifier = Modifier
-                    .size(240.dp)
-                    .padding(16.dp)
+                    .size(dims.avatarCall * 1.8f)
+                    .padding(dims.screenPadding)
             ) {
                 if (engineState.isIncomingCall || !engineState.isCallConnected) {
                     // Outer pulsing wave
                     Box(
                         modifier = Modifier
-                            .size(220.dp)
+                            .size(dims.avatarCall * 1.7f)
                             .scale(pulseScale)
                             .clip(CircleShape)
                             .background(WhatsAppGreenAccent.copy(alpha = waveAlpha))
@@ -235,7 +237,7 @@ fun CallScreen(
                     // Middle pulsing wave
                     Box(
                         modifier = Modifier
-                            .size(175.dp)
+                            .size(dims.avatarCall * 1.35f)
                             .scale(pulseScale * 0.92f)
                             .clip(CircleShape)
                             .background(WhatsAppTeal.copy(alpha = 0.35f))
@@ -245,16 +247,16 @@ fun CallScreen(
                 // Core Avatar Circle
                 Box(
                     modifier = Modifier
-                        .size(130.dp)
+                        .size(dims.avatarCall)
                         .clip(CircleShape),
                     contentAlignment = Alignment.Center
                 ) {
                     UserAvatar(
                         avatarUri = contact.avatarUri,
                         displayName = contact.displayName.ifBlank { contact.phoneNumber },
-                        size = 130.dp,
-                        iconSize = 68.dp,
-                        fontSize = 52.sp,
+                        size = dims.avatarCall,
+                        iconSize = dims.avatarCall * 0.52f,
+                        fontSize = (dims.avatarCall.value * 0.4f).sp,
                         border = androidx.compose.foundation.BorderStroke(3.dp, Color.White.copy(alpha = 0.4f))
                     )
                 }

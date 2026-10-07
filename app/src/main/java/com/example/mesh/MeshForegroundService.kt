@@ -80,7 +80,9 @@ class MeshForegroundService : Service() {
                 db.contactDao(),
                 db.messageDao(),
                 db.meshNodeDao(),
-                db.callDao()
+                db.callDao(),
+                db.storyDao(),
+                db.storySeenDao()
             )
             MeshEngineHolder.init(applicationContext, repo)
         } catch (_: Exception) {
@@ -107,7 +109,9 @@ class MeshForegroundService : Service() {
                                 db.contactDao(),
                                 db.messageDao(),
                                 db.meshNodeDao(),
-                                db.callDao()
+                                db.callDao(),
+                                db.storyDao(),
+                                db.storySeenDao()
                             )
                             MeshEngineHolder.init(applicationContext, repo)
                         } catch (_: Exception) {}
