@@ -33,9 +33,12 @@ import com.example.data.entity.StoryEntity
 import com.example.data.entity.StorySeenEntity
 import com.example.ui.components.UserAvatar
 import com.example.ui.theme.LocalAppDimensions
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import java.text.SimpleDateFormat
 import java.util.*
+
+private const val STORY_DURATION_MS = 5000L
 
 @Composable
 fun StoryViewerScreen(
@@ -44,6 +47,7 @@ fun StoryViewerScreen(
     onDeleteStory: (String) -> Unit,
     onGetViewersFlow: (String) -> Flow<List<StorySeenEntity>>,
     onDismiss: () -> Unit,
+    storyDurationMs: Long = STORY_DURATION_MS,
     modifier: Modifier = Modifier
 ) {
     if (stories.isEmpty()) {
@@ -53,27 +57,40 @@ fun StoryViewerScreen(
 
     val dims = LocalAppDimensions.current
     var currentIndex by remember { mutableIntStateOf(0) }
+    var timerKey by remember { mutableIntStateOf(0) }
     val currentStory = stories.getOrNull(currentIndex) ?: stories.first()
+
+    var imageReady by remember(currentStory.storyId) {
+        mutableStateOf(currentStory.mediaType != "IMAGE")
+    }
 
     var showViewersDialog by remember { mutableStateOf(false) }
     val viewers by onGetViewersFlow(currentStory.storyId).collectAsState(initial = emptyList())
 
     val progress = remember { Animatable(0f) }
 
-    // Marca como vista la historia actual
+    // Marca como vista la historia actual de forma desacoplada
     LaunchedEffect(currentStory.storyId) {
         onStoryViewed(currentStory.storyId)
     }
 
-    // Temporizador de 5 segundos con barra de progreso
-    LaunchedEffect(currentIndex) {
+    // Barra de progreso desacoplada: dura exactamente storyDurationMs
+    LaunchedEffect(currentStory.storyId, timerKey, imageReady) {
         progress.snapTo(0f)
+        if (!imageReady) return@LaunchedEffect
         progress.animateTo(
             targetValue = 1f,
-            animationSpec = tween(durationMillis = 5000, easing = LinearEasing)
+            animationSpec = tween(durationMillis = storyDurationMs.toInt(), easing = LinearEasing)
         )
-        if (currentIndex < stories.size - 1) {
+    }
+
+    // Temporizador de auto-avance desacoplado con timerKey e imageReady
+    LaunchedEffect(currentStory.storyId, timerKey, imageReady) {
+        if (!imageReady) return@LaunchedEffect
+        delay(storyDurationMs)
+        if (currentIndex < stories.lastIndex) {
             currentIndex++
+            timerKey++
         } else {
             onDismiss()
         }
@@ -101,10 +118,16 @@ fun StoryViewerScreen(
             if (currentStory.mediaType == "IMAGE") {
                 val imageBitmap = remember(currentStory.mediaBase64) {
                     try {
-                        val base64 = currentStory.mediaBase64 ?: return@remember null
+                        val base64 = currentStory.mediaBase64 ?: run {
+                            imageReady = true
+                            return@remember null
+                        }
                         val bytes = Base64.decode(base64, Base64.DEFAULT)
-                        BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
+                        val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
+                        imageReady = true
+                        bmp
                     } catch (_: Exception) {
+                        imageReady = true
                         null
                     }
                 }
@@ -160,7 +183,10 @@ fun StoryViewerScreen(
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null
                     ) {
-                        if (currentIndex > 0) currentIndex--
+                        if (currentIndex > 0) {
+                            currentIndex--
+                            timerKey++
+                        }
                     }
             )
             Box(
@@ -171,8 +197,9 @@ fun StoryViewerScreen(
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null
                     ) {
-                        if (currentIndex < stories.size - 1) {
+                        if (currentIndex < stories.lastIndex) {
                             currentIndex++
+                            timerKey++
                         } else {
                             onDismiss()
                         }
@@ -244,8 +271,14 @@ fun StoryViewerScreen(
                     IconButton(
                         onClick = {
                             onDeleteStory(currentStory.storyId)
-                            if (stories.size <= 1) onDismiss()
-                            else if (currentIndex >= stories.size - 1) currentIndex--
+                            if (stories.size <= 1) {
+                                onDismiss()
+                            } else if (currentIndex >= stories.lastIndex) {
+                                currentIndex--
+                                timerKey++
+                            } else {
+                                timerKey++
+                            }
                         }
                     ) {
                         Icon(

@@ -66,6 +66,9 @@ class WiFiMeshEngine(
     private val AUDIO_UDP_PORT = 8991
     val MESH_GLOBAL_PASSPHRASE = "12345678"
 
+    private val PEER_TIMEOUT_MS = 25_000L   // 25s sin beacon = offline
+    private val PEER_SWEEP_INTERVAL_MS = 10_000L  // revisar cada 10s
+
     // Chunks de medios: más grandes = menos paquetes, más rápidos
     private val MEDIA_CHUNK_SIZE = 4096
     private val CHUNK_DELAY_MS = 8L
@@ -252,6 +255,7 @@ class WiFiMeshEngine(
     private val receivedChunks = ConcurrentHashMap<String, ConcurrentHashMap<Int, String>>()
 
     private var meshMaintenanceJob: Job? = null
+    private var peerSweepJob: Job? = null
     private var audioRecordJob: Job? = null
     private var audioPlayJob: Job? = null
     private var audioRecord: AudioRecord? = null
@@ -286,8 +290,19 @@ class WiFiMeshEngine(
                     }
                 }
                 WifiP2pManager.WIFI_P2P_CONNECTION_CHANGED_ACTION -> {
-                    requestGroupAndConnectionDetails()
-                    evaluateAndAutoConnectToBestNode()
+                    // Primero verificar si el grupo sigue formado
+                    p2pManager?.requestConnectionInfo(p2pChannel) { info ->
+                        if (info == null || !info.groupFormed) {
+                            // El grupo WiFi Direct se ha disuelto: marcar todos los peers
+                            // que conocíamos como desconectados, salvo el propio.
+                            scope.launch {
+                                onP2pGroupLost()
+                            }
+                        } else {
+                            requestGroupAndConnectionDetails()
+                            evaluateAndAutoConnectToBestNode()
+                        }
+                    }
                 }
                 WifiP2pManager.WIFI_P2P_THIS_DEVICE_CHANGED_ACTION -> {
                     @Suppress("DEPRECATION")
@@ -960,7 +975,7 @@ class WiFiMeshEngine(
         try {
             socket.tcpNoDelay = true
             socket.keepAlive = true
-            socket.soTimeout = 60_000
+            socket.soTimeout = 30_000
             socket.sendBufferSize = 512 * 1024
             socket.receiveBufferSize = 512 * 1024
         } catch (_: Exception) {}
@@ -1097,6 +1112,88 @@ class WiFiMeshEngine(
                 retryStoreAndForwardQueue()
                 delay(8000)
             }
+        }
+        // NUEVO: job que detecta peers inactivos
+        peerSweepJob = scope.launch(Dispatchers.IO) {
+            while (isActive) {
+                sweepInactivePeers()
+                delay(PEER_SWEEP_INTERVAL_MS)
+            }
+        }
+    }
+
+    /**
+     * Revisa peerMetrics y marca como desconectados a los peers cuyo
+     * último heartbeat sea mayor que PEER_TIMEOUT_MS.
+     */
+    private suspend fun sweepInactivePeers() {
+        val now = System.currentTimeMillis()
+        val myPhone = _engineState.value.myPhoneNumber
+        val stalePhones = mutableListOf<String>()
+
+        for ((nodeId, metric) in peerMetrics) {
+            val elapsed = now - metric.lastHeartbeat
+            if (elapsed > PEER_TIMEOUT_MS) {
+                val phone = metric.phoneNumber
+                if (phone.isNotBlank() && phone != myPhone) {
+                    stalePhones.add(phone)
+                }
+                peerMetrics.remove(nodeId)
+            }
+        }
+
+        for (phone in stalePhones) {
+            try {
+                repository.updateConnectionStatus(phone, false, now)
+                val node = repository.getActiveNodes().firstOrNull { it.phoneNumber == phone }
+                if (node != null) {
+                    repository.setNodeInactive(node.nodeId)
+                }
+                Log.i(TAG, "Peer marcado como offline por inactividad: $phone")
+            } catch (_: Exception) {}
+        }
+
+        if (stalePhones.isNotEmpty()) {
+            _engineState.value = _engineState.value.copy(
+                connectedPeersCount = activeClientSockets.size
+            )
+        }
+    }
+
+    private suspend fun onP2pGroupLost() {
+        try {
+            val myPhone = _engineState.value.myPhoneNumber
+            val now = System.currentTimeMillis()
+
+            // Marcar peers conocidos como offline
+            for ((_, metric) in peerMetrics) {
+                val phone = metric.phoneNumber
+                if (phone.isNotBlank() && phone != myPhone) {
+                    try {
+                        repository.updateConnectionStatus(phone, false, now)
+                        val node = repository.getActiveNodes().firstOrNull { it.phoneNumber == phone }
+                        if (node != null) repository.setNodeInactive(node.nodeId)
+                    } catch (_: Exception) {}
+                }
+            }
+            peerMetrics.clear()
+
+            // Cerrar sockets activos
+            activeClientSockets.values.forEach { try { it.close() } catch (_: Exception) {} }
+            activeClientSockets.clear()
+            socketWriters.values.forEach { try { it.close() } catch (_: Exception) {} }
+            socketWriters.clear()
+            socketMutexes.clear()
+
+            // Actualizar estado del motor
+            _engineState.value = _engineState.value.copy(
+                connectedPeersCount = 0,
+                localIpAddress = ""
+            )
+
+            Log.i(TAG, "Grupo WiFi Direct perdido, peers marcados como offline")
+        } catch (e: Exception) {
+            Log.e(TAG, "Error en onP2pGroupLost", e)
         }
     }
 
@@ -2425,6 +2522,8 @@ class WiFiMeshEngine(
             audioRecordJob?.cancel()
             audioPlayJob?.cancel()
             meshMaintenanceJob?.cancel()
+            peerSweepJob?.cancel()
+            peerSweepJob = null
             callTimerJob?.cancel()
             networkMonitorJob?.cancel()
             if (isP2pReceiverRegistered) {
