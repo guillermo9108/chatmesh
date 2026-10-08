@@ -1,6 +1,8 @@
 {
-  "name": "ChatMesh",
-  "description": "WhatsApp-style offline native mesh chat powered by WiFi Direct, Hotspot, WiFi LAN and BLE discovery without Internet",
+  "name": "Remix ChatMesh",
+  "description": "WhatsApp-style offline native mesh chat powered by WiFi Direct and WiFi Aware without Internet",
   "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
 }

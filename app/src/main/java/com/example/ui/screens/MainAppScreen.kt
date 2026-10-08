@@ -112,6 +112,7 @@ fun MainAppScreen(
     ) {
         viewModel.refreshContacts()
         viewModel.reloadSimDetails()
+        viewModel.restartBleDiscovery()
     }
 
     LaunchedEffect(Unit) {

@@ -9,7 +9,7 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.aistudio.chatmesh.offline"
+        applicationId = "com.aistudio.chatmesh.offline.qsarrk"
         minSdk = 24
         targetSdk = 35
         versionCode = 1
@@ -62,4 +62,5 @@ implementation("androidx.exifinterface:exifinterface:1.3.7")
     implementation(libs.kotlinx.coroutines.android)
 
     debugImplementation(libs.androidx.ui.tooling)
+    testImplementation("junit:junit:4.13.2")
 }

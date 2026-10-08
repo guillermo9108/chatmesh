@@ -513,6 +513,7 @@ class ChatMeshViewModel(application: Application) : AndroidViewModel(application
 
     fun startP2pDiscovery() { meshEngine.startP2pDiscovery() }
     fun reCreateP2pGroup() { meshEngine.reCreateP2pGroup() }
+    fun restartBleDiscovery() { meshEngine.startOrRestartBleDiscovery() }
     fun sendAudioMessage(base64Audio: String, durationSeconds: Int) { sendAudioVoiceMessage(base64Audio, durationSeconds) }
     fun sendUserStatus(status: String) { _selectedContact.value?.let { meshEngine.sendUserStatus(it.phoneNumber, status) } }
     fun sendUserStatus(phoneNumber: String, status: String) { meshEngine.sendUserStatus(phoneNumber, status) }

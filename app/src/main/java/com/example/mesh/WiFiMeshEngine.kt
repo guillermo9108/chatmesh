@@ -2463,6 +2463,42 @@ class WiFiMeshEngine(
         } catch (_: Exception) { false }
     }
 
+    fun startOrRestartBleDiscovery() {
+        try {
+            if (bleDiscovery == null) {
+                bleDiscovery = BleDiscoveryService(
+                    context = context,
+                    myProfileProvider = { buildMyBleProfile() },
+                    onPeerDiscovered = { peer, rssi ->
+                        Log.i(TAG, "BLE peer: ${peer.nickname} score=${peer.score}")
+                        val peers = bleDiscovery?.getDiscoveredPeers() ?: emptyList()
+                        _engineState.value = _engineState.value.copy(
+                            bleEnabled = true,
+                            blePeersCount = peers.size,
+                            blePeersPhones = peers.map { it.phoneNumber }
+                        )
+                    },
+                    onPeerLost = { phone ->
+                        val peers = bleDiscovery?.getDiscoveredPeers() ?: emptyList()
+                        _engineState.value = _engineState.value.copy(
+                            blePeersCount = peers.size,
+                            blePeersPhones = peers.map { it.phoneNumber }
+                        )
+                    },
+                    onShouldBecomeGo = {
+                        onShouldBecomeGoFromBle()
+                    }
+                )
+            }
+            bleDiscovery?.start()
+            _engineState.value = _engineState.value.copy(
+                bleEnabled = bleDiscovery?.isSupported() == true
+            )
+        } catch (e: Exception) {
+            Log.e(TAG, "Error iniciando/reiniciando BLE discovery", e)
+        }
+    }
+
     private fun onShouldBecomeGoFromBle() {
         if (_engineState.value.isGroupOwner) return
         if (activeClientSockets.isNotEmpty()) return
