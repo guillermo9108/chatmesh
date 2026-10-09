@@ -1,32 +1,55 @@
 package com.example.ui.components
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
-import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.mesh.VideoQuality
-import com.example.ui.theme.LocalAppDimensions
-import com.example.ui.theme.WhatsAppGreenAccent
-import com.example.ui.theme.WhatsAppTeal
+import com.example.ui.theme.*
 
+/**
+ * Modern WhatsApp TopBar (Latest 2024-2026 Redesign):
+ * - Clean surface background (white in light mode, dark surface in dark mode)
+ * - Authentic bold "WhatsApp" green wordmark with offline mesh indicator
+ * - Header action buttons: Camera, Network Status, Search, and 3-dots Menu
+ * - Seamless search bar mode
+ * - Modern Filter Chips row: "Todos", "No leídos", "Favoritos", "Malla P2P", "Grupos"
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun WhatsAppTopBar(
-    selectedTabIndex: Int,
-    onTabSelected: (Int) -> Unit,
-    onSearchClick: () -> Unit,
+    currentTabTitle: String = "WhatsApp",
+    selectedFilterChip: String = "Todos",
+    onFilterChipSelected: (String) -> Unit = {},
+    showFilterChips: Boolean = true,
+    isSearchActive: Boolean = false,
+    searchQuery: String = "",
+    onSearchQueryChange: (String) -> Unit = {},
+    onSearchActiveChange: (Boolean) -> Unit = {},
+    onCameraClick: () -> Unit = {},
     onProfileClick: () -> Unit,
     onSyncContactsClick: () -> Unit,
     onSimConfigClick: () -> Unit,
@@ -35,248 +58,303 @@ fun WhatsAppTopBar(
     onVideoQualityClick: () -> Unit = {},
     onShareAppClick: () -> Unit = {},
     currentVideoQuality: VideoQuality = VideoQuality.MEDIUM,
-    unreadChatsCount: Int,
-    unreadStoriesCount: Int = 0,
-    connectedNodesCount: Int,
-    ssidName: String
+    connectedNodesCount: Int = 0,
+    ssidName: String = "",
+    isWifiDirectActive: Boolean = false,
+    isHotspotActive: Boolean = false
 ) {
-    val dims = LocalAppDimensions.current
     var menuExpanded by remember { mutableStateOf(false) }
 
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(WhatsAppTeal)
+    Surface(
+        color = MaterialTheme.colorScheme.surface,
+        modifier = Modifier.fillMaxWidth()
     ) {
-        TopAppBar(
-            title = {
-                Column {
-                    Text(
-                        text = "ChatMesh",
-                        color = Color.White,
-                        fontSize = dims.titleSize,
-                        fontWeight = FontWeight.Bold
-                    )
-                    if (ssidName.isNotBlank()) {
-                        Text(
-                            text = ssidName,
-                            color = Color.White.copy(alpha = 0.85f),
-                            fontSize = dims.smallSize,
-                            maxLines = 1
-                        )
-                    }
-                }
-            },
-            colors = TopAppBarDefaults.topAppBarColors(
-                containerColor = WhatsAppTeal,
-                titleContentColor = Color.White,
-                actionIconContentColor = Color.White
-            ),
-            actions = {
-                IconButton(
-                    onClick = onMeshSettingsClick,
-                    modifier = Modifier.testTag("network_mode_button")
+        Column(modifier = Modifier.fillMaxWidth()) {
+            if (isSearchActive) {
+                // Modo búsqueda integrado con animación limpia
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(58.dp)
+                        .padding(horizontal = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.Router,
-                        contentDescription = "Red WiFi LAN / Hotspot",
-                        tint = Color.White
-                    )
-                }
-
-                IconButton(
-                    onClick = onSearchClick,
-                    modifier = Modifier.testTag("search_button")
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Search,
-                        contentDescription = "Buscar",
-                        tint = Color.White
-                    )
-                }
-
-                Box {
                     IconButton(
-                        onClick = { menuExpanded = true },
-                        modifier = Modifier.testTag("menu_button")
+                        onClick = {
+                            onSearchActiveChange(false)
+                            onSearchQueryChange("")
+                        }
                     ) {
                         Icon(
-                            imageVector = Icons.Default.MoreVert,
-                            contentDescription = "Más opciones",
-                            tint = Color.White
+                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "Cerrar búsqueda",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
 
-                    DropdownMenu(
-                        expanded = menuExpanded,
-                        onDismissRequest = { menuExpanded = false }
-                    ) {
-                        DropdownMenuItem(
-                            text = { Text("Mi Perfil") },
-                            leadingIcon = { Icon(Icons.Default.Person, contentDescription = null) },
-                            onClick = {
-                                menuExpanded = false
-                                onProfileClick()
+                    BasicTextField(
+                        value = searchQuery,
+                        onValueChange = onSearchQueryChange,
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(horizontal = 8.dp)
+                            .testTag("top_search_input"),
+                        singleLine = true,
+                        textStyle = TextStyle(
+                            color = MaterialTheme.colorScheme.onSurface,
+                            fontSize = 17.sp,
+                            fontWeight = FontWeight.Normal
+                        ),
+                        cursorBrush = SolidColor(WhatsAppGreenPrimary),
+                        decorationBox = { innerTextField ->
+                            if (searchQuery.isEmpty()) {
+                                Text(
+                                    text = "Buscar chats o mensajes...",
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    fontSize = 16.sp
+                                )
                             }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("Sincronizar Contactos") },
-                            leadingIcon = { Icon(Icons.Default.Sync, contentDescription = null) },
-                            onClick = {
-                                menuExpanded = false
-                                onSyncContactsClick()
-                            }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("Configuración SIM") },
-                            leadingIcon = { Icon(Icons.Default.SimCard, contentDescription = null) },
-                            onClick = {
-                                menuExpanded = false
-                                onSimConfigClick()
-                            }
-                        )
-                        DropdownMenuItem(
-                            text = {
-                                Column {
-                                    Text("Calidad de Videollamada")
-                                    Text(currentVideoQuality.title, fontSize = 11.sp, color = WhatsAppTeal)
-                                }
-                            },
-                            leadingIcon = { Icon(Icons.Default.Videocam, contentDescription = null, tint = WhatsAppTeal) },
-                            onClick = {
-                                menuExpanded = false
-                                onVideoQualityClick()
-                            }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("Compartir Aplicación") },
-                            leadingIcon = { Icon(Icons.Default.Share, contentDescription = null, tint = WhatsAppTeal) },
-                            onClick = {
-                                menuExpanded = false
-                                onShareAppClick()
-                            }
-                        )
-                        HorizontalDivider()
-                        DropdownMenuItem(
-                            text = { Text("Red WiFi LAN (Router)") },
-                            leadingIcon = { Icon(Icons.Default.Router, contentDescription = null, tint = WhatsAppTeal) },
-                            onClick = {
-                                menuExpanded = false
-                                onMeshSettingsClick()
-                            }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("Punto de Acceso (Hotspot)") },
-                            leadingIcon = { Icon(Icons.Default.WifiTethering, contentDescription = null, tint = WhatsAppTeal) },
-                            onClick = {
-                                menuExpanded = false
-                                onMeshSettingsClick()
-                            }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("Ajustes WiFi Direct (P2P)") },
-                            leadingIcon = { Icon(Icons.Default.Wifi, contentDescription = null, tint = WhatsAppTeal) },
-                            onClick = {
-                                menuExpanded = false
-                                onMeshSettingsClick()
-                            }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("Acerca de ChatMesh") },
-                            leadingIcon = { Icon(Icons.Default.Info, contentDescription = null) },
-                            onClick = {
-                                menuExpanded = false
-                                onGitHubClick()
-                            }
-                        )
-                    }
-                }
-            }
-        )
-
-        // Tab bar adaptativa scrollable con las 5 pestañas
-        val tabs = listOf("CHATS", "CONTACTOS", "ESTADOS", "NODOS MESH", "LLAMADAS")
-        ScrollableTabRow(
-            selectedTabIndex = selectedTabIndex,
-            containerColor = WhatsAppTeal,
-            contentColor = Color.White,
-            edgePadding = 0.dp,
-            indicator = { tabPositions ->
-                if (selectedTabIndex < tabPositions.size) {
-                    TabRowDefaults.SecondaryIndicator(
-                        modifier = Modifier.tabIndicatorOffset(tabPositions[selectedTabIndex]),
-                        height = 3.dp,
-                        color = Color.White
+                            innerTextField()
+                        }
                     )
-                }
-            }
-        ) {
-            tabs.forEachIndexed { index, title ->
-                Tab(
-                    selected = selectedTabIndex == index,
-                    onClick = { onTabSelected(index) },
-                    text = {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.padding(dims.tabPadding)
-                        ) {
-                            Text(
-                                text = title,
-                                fontSize = dims.tabFontSize,
-                                fontWeight = if (selectedTabIndex == index) FontWeight.Bold else FontWeight.Medium,
-                                color = if (selectedTabIndex == index) Color.White else Color.White.copy(alpha = 0.7f),
-                                maxLines = 1
+
+                    if (searchQuery.isNotEmpty()) {
+                        IconButton(onClick = { onSearchQueryChange("") }) {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Limpiar texto",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
                             )
-                            if (index == 0 && unreadChatsCount > 0) {
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Box(
-                                    modifier = Modifier
-                                        .clip(CircleShape)
-                                        .background(WhatsAppGreenAccent)
-                                        .padding(horizontal = 5.dp, vertical = 1.dp)
+                        }
+                    }
+                }
+            } else {
+                // Barra de herramientas estándar de WhatsApp moderno
+                TopAppBar(
+                    title = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = "WhatsApp",
+                                color = WhatsAppGreenPrimary,
+                                fontSize = 23.sp,
+                                fontWeight = FontWeight.Bold,
+                                letterSpacing = (-0.5).sp
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+
+                            // Chip indicador sutil de red malla offline
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = WhatsAppGreenPrimary.copy(alpha = 0.12f),
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .clickable { onMeshSettingsClick() }
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                                 ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(6.dp)
+                                            .clip(CircleShape)
+                                            .background(
+                                                if (isWifiDirectActive || isHotspotActive || connectedNodesCount > 0)
+                                                    WhatsAppGreenPrimary
+                                                else
+                                                    Color.Gray
+                                            )
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
                                     Text(
-                                        text = unreadChatsCount.toString(),
-                                        fontSize = dims.tinySize,
+                                        text = if (connectedNodesCount > 0) "$connectedNodesCount P2P" else "Malla",
+                                        fontSize = 10.sp,
                                         fontWeight = FontWeight.Bold,
-                                        color = Color.Black
+                                        color = WhatsAppGreenPrimary
                                     )
                                 }
-                            } else if (index == 2 && unreadStoriesCount > 0) {
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Box(
-                                    modifier = Modifier
-                                        .clip(CircleShape)
-                                        .background(WhatsAppGreenAccent)
-                                        .padding(horizontal = 5.dp, vertical = 1.dp)
-                                ) {
-                                    Text(
-                                        text = unreadStoriesCount.toString(),
-                                        fontSize = dims.tinySize,
-                                        fontWeight = FontWeight.Bold,
-                                        color = Color.Black
-                                    )
-                                }
-                            } else if (index == 3 && connectedNodesCount > 0) {
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Box(
-                                    modifier = Modifier
-                                        .clip(CircleShape)
-                                        .background(Color.White)
-                                        .padding(horizontal = 5.dp, vertical = 1.dp)
-                                ) {
-                                    Text(
-                                        text = connectedNodesCount.toString(),
-                                        fontSize = dims.tinySize,
-                                        fontWeight = FontWeight.Bold,
-                                        color = WhatsAppTeal
-                                    )
-                                }
+                            }
+                        }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = MaterialTheme.colorScheme.surface,
+                        titleContentColor = WhatsAppGreenPrimary,
+                        actionIconContentColor = MaterialTheme.colorScheme.onSurface
+                    ),
+                    actions = {
+                        // Botón de Cámara (icónico de WhatsApp)
+                        IconButton(
+                            onClick = onCameraClick,
+                            modifier = Modifier.testTag("camera_header_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.PhotoCamera,
+                                contentDescription = "Cámara",
+                                tint = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+
+                        // Botón de estado de Red Malla / Router
+                        IconButton(
+                            onClick = onMeshSettingsClick,
+                            modifier = Modifier.testTag("network_mode_button")
+                        ) {
+                            Icon(
+                                imageVector = when {
+                                    isHotspotActive -> Icons.Default.WifiTethering
+                                    isWifiDirectActive -> Icons.Default.Wifi
+                                    else -> Icons.Default.Router
+                                },
+                                contentDescription = "Ajustes de Red",
+                                tint = if (isWifiDirectActive || isHotspotActive) WhatsAppGreenPrimary else MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+
+                        // Botón de Búsqueda
+                        IconButton(
+                            onClick = { onSearchActiveChange(true) },
+                            modifier = Modifier.testTag("search_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Search,
+                                contentDescription = "Buscar",
+                                tint = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+
+                        // Menú de 3 puntos
+                        Box {
+                            IconButton(
+                                onClick = { menuExpanded = true },
+                                modifier = Modifier.testTag("menu_button")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.MoreVert,
+                                    contentDescription = "Más opciones",
+                                    tint = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+
+                            DropdownMenu(
+                                expanded = menuExpanded,
+                                onDismissRequest = { menuExpanded = false },
+                                modifier = Modifier.background(MaterialTheme.colorScheme.surface)
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text("Mi Perfil") },
+                                    leadingIcon = { Icon(Icons.Default.Person, contentDescription = null, tint = WhatsAppGreenPrimary) },
+                                    onClick = {
+                                        menuExpanded = false
+                                        onProfileClick()
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Sincronizar Contactos") },
+                                    leadingIcon = { Icon(Icons.Default.Sync, contentDescription = null, tint = WhatsAppGreenPrimary) },
+                                    onClick = {
+                                        menuExpanded = false
+                                        onSyncContactsClick()
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Configuración SIM") },
+                                    leadingIcon = { Icon(Icons.Default.SimCard, contentDescription = null, tint = WhatsAppGreenPrimary) },
+                                    onClick = {
+                                        menuExpanded = false
+                                        onSimConfigClick()
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = {
+                                        Column {
+                                            Text("Calidad de Videollamada")
+                                            Text(currentVideoQuality.title, fontSize = 11.sp, color = WhatsAppGreenPrimary)
+                                        }
+                                    },
+                                    leadingIcon = { Icon(Icons.Default.Videocam, contentDescription = null, tint = WhatsAppGreenPrimary) },
+                                    onClick = {
+                                        menuExpanded = false
+                                        onVideoQualityClick()
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Compartir Aplicación") },
+                                    leadingIcon = { Icon(Icons.Default.Share, contentDescription = null, tint = WhatsAppGreenPrimary) },
+                                    onClick = {
+                                        menuExpanded = false
+                                        onShareAppClick()
+                                    }
+                                )
+                                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                                DropdownMenuItem(
+                                    text = { Text("Ajustes de Red y Malla") },
+                                    leadingIcon = { Icon(Icons.Default.Settings, contentDescription = null, tint = WhatsAppGreenPrimary) },
+                                    onClick = {
+                                        menuExpanded = false
+                                        onMeshSettingsClick()
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Acerca de ChatMesh") },
+                                    leadingIcon = { Icon(Icons.Default.Info, contentDescription = null) },
+                                    onClick = {
+                                        menuExpanded = false
+                                        onGitHubClick()
+                                    }
+                                )
                             }
                         }
                     }
                 )
             }
+
+            // Chips de filtrado rápido estilo WhatsApp moderno (solo cuando no se busca y en vista de chats)
+            if (showFilterChips && !isSearchActive) {
+                val chips = listOf("Todos", "No leídos", "Favoritos", "Malla P2P", "Contactos")
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState())
+                        .padding(horizontal = 14.dp, vertical = 6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    chips.forEach { chipName ->
+                        val isSelected = selectedFilterChip == chipName
+                        val chipBg = if (isSelected) {
+                            WhatsAppChipSelectedLight
+                        } else {
+                            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f)
+                        }
+                        val chipTextColor = if (isSelected) {
+                            WhatsAppChipTextSelectedLight
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        }
+
+                        Surface(
+                            shape = RoundedCornerShape(20.dp),
+                            color = chipBg,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(20.dp))
+                                .clickable { onFilterChipSelected(chipName) }
+                        ) {
+                            Text(
+                                text = chipName,
+                                fontSize = 13.sp,
+                                fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
+                                color = chipTextColor,
+                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Línea divisoria muy sutil
+            HorizontalDivider(
+                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+                thickness = 0.6.dp
+            )
         }
     }
 }

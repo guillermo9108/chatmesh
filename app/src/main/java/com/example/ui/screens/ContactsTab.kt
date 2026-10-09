@@ -25,9 +25,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.entity.ContactEntity
 import com.example.ui.components.UserAvatar
-import com.example.ui.theme.LocalAppDimensions
-import com.example.ui.theme.WhatsAppGreenAccent
-import com.example.ui.theme.WhatsAppTeal
+import com.example.ui.theme.*
 
 @Composable
 fun ContactsTab(
@@ -76,7 +74,7 @@ fun ContactsTab(
                         Icon(
                             imageVector = Icons.Default.Search,
                             contentDescription = "Buscar",
-                            tint = WhatsAppTeal
+                            tint = WhatsAppGreenDark
                         )
                     },
                     trailingIcon = {
@@ -96,7 +94,7 @@ fun ContactsTab(
                     singleLine = true,
                     shape = RoundedCornerShape(24.dp),
                     colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = WhatsAppTeal,
+                        focusedBorderColor = WhatsAppGreenPrimary,
                         unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant,
                         focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
                         unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f)
@@ -129,7 +127,7 @@ fun ContactsTab(
                         Text(
                             text = "$inMeshCount en Malla P2P",
                             fontSize = 12.sp,
-                            color = WhatsAppTeal,
+                            color = WhatsAppGreenDark,
                             fontWeight = FontWeight.SemiBold
                         )
                     }
@@ -167,7 +165,7 @@ fun ContactsTab(
                         Spacer(modifier = Modifier.height(12.dp))
                         TextButton(
                             onClick = { onSearchQueryChange("") },
-                            colors = ButtonDefaults.textButtonColors(contentColor = WhatsAppTeal)
+                            colors = ButtonDefaults.textButtonColors(contentColor = WhatsAppGreenDark)
                         ) {
                             Text("Limpiar filtro de búsqueda")
                         }
@@ -240,7 +238,7 @@ fun ContactItemRow(
         if (contact.isConnected || contact.isRegisteredInMesh) {
             Surface(
                 shape = CircleShape,
-                color = WhatsAppGreenAccent.copy(alpha = 0.15f)
+                color = WhatsAppChipSelectedLight
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
@@ -249,7 +247,7 @@ fun ContactItemRow(
                     Icon(
                         Icons.Default.Wifi,
                         contentDescription = null,
-                        tint = WhatsAppTeal,
+                        tint = WhatsAppGreenDark,
                         modifier = Modifier.size(12.dp)
                     )
                     Spacer(modifier = Modifier.width(4.dp))
@@ -257,7 +255,7 @@ fun ContactItemRow(
                         text = "En Malla",
                         fontSize = dims.tinySize,
                         fontWeight = FontWeight.Bold,
-                        color = WhatsAppTeal
+                        color = WhatsAppGreenDark
                     )
                 }
             }

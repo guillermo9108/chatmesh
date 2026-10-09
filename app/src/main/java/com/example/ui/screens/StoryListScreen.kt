@@ -27,10 +27,7 @@ import androidx.compose.ui.unit.sp
 import com.example.data.entity.StoryEntity
 import com.example.data.entity.UserProfile
 import com.example.ui.components.UserAvatar
-import com.example.ui.theme.LocalAppDimensions
-import com.example.ui.theme.WhatsAppGreenAccent
-import com.example.ui.theme.WhatsAppGreenLight
-import com.example.ui.theme.WhatsAppTeal
+import com.example.ui.theme.*
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -165,24 +162,6 @@ fun StoryListScreen(
             }
         }
 
-        // FAB de publicación de estado
-        FloatingActionButton(
-            onClick = onOpenCreateStory,
-            containerColor = WhatsAppTeal,
-            contentColor = Color.White,
-            shape = CircleShape,
-            modifier = Modifier
-                .align(Alignment.BottomEnd)
-                .padding(dims.screenPadding)
-                .size(dims.floatingActionButtonSize)
-                .testTag("create_story_fab")
-        ) {
-            Icon(
-                imageVector = Icons.Default.CameraAlt,
-                contentDescription = "Crear Estado",
-                modifier = Modifier.size(24.dp)
-            )
-        }
     }
 }
 
@@ -212,7 +191,7 @@ private fun MyStatusRow(
                     .size(dims.avatarLarge)
                     .clip(CircleShape)
                     .then(
-                        if (hasStories) Modifier.border(2.5.dp, WhatsAppGreenAccent, CircleShape)
+                        if (hasStories) Modifier.border(2.5.dp, WhatsAppGreenPrimary, CircleShape)
                         else Modifier
                     )
                     .padding(if (hasStories) 3.dp else 0.dp)
@@ -230,7 +209,7 @@ private fun MyStatusRow(
                         .align(Alignment.BottomEnd)
                         .size(20.dp)
                         .clip(CircleShape)
-                        .background(WhatsAppTeal)
+                        .background(WhatsAppGreenPrimary)
                         .border(1.5.dp, Color.White, CircleShape),
                     contentAlignment = Alignment.Center
                 ) {
@@ -271,7 +250,7 @@ private fun MyStatusRow(
                 Icon(
                     imageVector = Icons.Default.Edit,
                     contentDescription = "Nuevo estado",
-                    tint = WhatsAppTeal,
+                    tint = WhatsAppGreenPrimary,
                     modifier = Modifier.size(20.dp)
                 )
             }
@@ -308,7 +287,7 @@ private fun StoryAuthorRow(
                     .clip(CircleShape)
                     .border(
                         width = 2.5.dp,
-                        color = if (hasUnseen) WhatsAppGreenAccent else Color.Gray.copy(alpha = 0.5f),
+                        color = if (hasUnseen) WhatsAppGreenPrimary else Color.Gray.copy(alpha = 0.5f),
                         shape = CircleShape
                     )
                     .padding(3.dp)

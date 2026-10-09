@@ -25,9 +25,7 @@ import androidx.compose.ui.unit.sp
 import com.example.data.entity.MeshNodeEntity
 import com.example.mesh.MeshEngineState
 import com.example.mesh.MeshTransport
-import com.example.ui.theme.LocalAppDimensions
-import com.example.ui.theme.WhatsAppGreenAccent
-import com.example.ui.theme.WhatsAppTeal
+import com.example.ui.theme.*
 
 @Composable
 fun MeshNodesTab(
@@ -35,6 +33,7 @@ fun MeshNodesTab(
     meshNodes: List<MeshNodeEntity>,
     onScanPeers: () -> Unit,
     onConnectDevice: (WifiP2pDevice) -> Unit,
+    onDisconnectDevice: () -> Unit = {},
     onStartHotspot: () -> Unit = {},
     onStopHotspot: () -> Unit = {},
     modifier: Modifier = Modifier
@@ -510,13 +509,22 @@ fun MeshNodesTab(
                             )
                         }
 
-                        Button(
-                            onClick = { onConnectDevice(dev) },
-                            colors = ButtonDefaults.buttonColors(containerColor = WhatsAppTeal),
-                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                            enabled = dev.status != WifiP2pDevice.CONNECTED
-                        ) {
-                            Text(if (dev.status == WifiP2pDevice.CONNECTED) "Conectado" else "Conectar", fontSize = 12.sp)
+                        if (dev.status == WifiP2pDevice.CONNECTED) {
+                            OutlinedButton(
+                                onClick = onDisconnectDevice,
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                            ) {
+                                Text("Desconectar", fontSize = 11.sp)
+                            }
+                        } else {
+                            Button(
+                                onClick = { onConnectDevice(dev) },
+                                colors = ButtonDefaults.buttonColors(containerColor = WhatsAppTeal),
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                            ) {
+                                Text("Conectar", fontSize = 12.sp)
+                            }
                         }
                     }
                 }

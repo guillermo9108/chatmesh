@@ -31,9 +31,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.entity.ContactEntity
-import com.example.ui.theme.WhatsAppGreenAccent
-import com.example.ui.theme.WhatsAppGreenLight
-import com.example.ui.theme.WhatsAppTeal
+import com.example.ui.theme.*
 
 /**
  * Fila horizontal estilo Messenger de usuarios y contactos en línea en la red malla.
@@ -67,35 +65,35 @@ fun OnlineUsersRow(
                     modifier = Modifier
                         .size(8.dp)
                         .clip(CircleShape)
-                        .background(WhatsAppGreenAccent)
+                        .background(WhatsAppGreenPrimary)
                 )
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(
                     text = "En línea ahora (${onlineContacts.size})",
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Bold,
-                    color = WhatsAppTeal
+                    color = WhatsAppGreenDark
                 )
                 Spacer(modifier = Modifier.weight(1f))
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier
                         .clip(RoundedCornerShape(12.dp))
-                        .background(WhatsAppGreenLight.copy(alpha = 0.15f))
+                        .background(WhatsAppChipSelectedLight)
                         .padding(horizontal = 8.dp, vertical = 2.dp)
                 ) {
                     Icon(
                         imageVector = Icons.Default.Wifi,
                         contentDescription = null,
-                        tint = WhatsAppGreenLight,
+                        tint = WhatsAppGreenDark,
                         modifier = Modifier.size(12.dp)
                     )
                     Spacer(modifier = Modifier.width(4.dp))
                     Text(
                         text = "Malla activa",
                         fontSize = 10.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = WhatsAppGreenLight
+                        fontWeight = FontWeight.SemiBold,
+                        color = WhatsAppGreenDark
                     )
                 }
             }
@@ -152,7 +150,7 @@ fun OnlineUserItem(
                 modifier = Modifier
                     .size(52.dp)
                     .clip(CircleShape)
-                    .border(2.dp, WhatsAppGreenAccent, CircleShape)
+                    .border(2.dp, WhatsAppGreenPrimary, CircleShape)
                     .padding(2.dp)
             ) {
                 UserAvatar(
@@ -176,7 +174,7 @@ fun OnlineUserItem(
                     modifier = Modifier
                         .fillMaxSize()
                         .clip(CircleShape)
-                        .background(WhatsAppGreenAccent)
+                        .background(WhatsAppGreenPrimary)
                 )
             }
         }

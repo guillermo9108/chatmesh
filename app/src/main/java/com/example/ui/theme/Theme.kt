@@ -8,33 +8,35 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 
 private val DarkColorScheme = darkColorScheme(
-    primary = WhatsAppGreenLight,
+    primary = WhatsAppGreenPrimary,
     onPrimary = Color(0xFF00382B),
-    primaryContainer = Color(0xFF00513F),
-    onPrimaryContainer = Color(0xFF73F8D3),
-    secondary = WhatsAppGreenAccent,
-    onSecondary = Color(0xFF00391A),
-    background = DarkBackground,
-    onBackground = Color(0xFFE1E3DF),
-    surface = DarkSurface,
-    onSurface = Color(0xFFE1E3DF),
+    primaryContainer = WhatsAppGreenPillDark,
+    onPrimaryContainer = WhatsAppGreenPrimary,
+    secondary = WhatsAppGreenTeal,
+    onSecondary = Color.Black,
+    background = WhatsAppBackgroundDark,
+    onBackground = WhatsAppTextPrimaryDark,
+    surface = WhatsAppSurfaceDark,
+    onSurface = WhatsAppTextPrimaryDark,
     surfaceVariant = DarkSurfaceVariant,
-    onSurfaceVariant = Color(0xFFC3C7BE)
+    onSurfaceVariant = WhatsAppTextSecondaryDark,
+    outlineVariant = WhatsAppDividerDark
 )
 
 private val LightColorScheme = lightColorScheme(
-    primary = WhatsAppTeal,
+    primary = WhatsAppGreenDark,
     onPrimary = Color.White,
-    primaryContainer = Color(0xFF7CF8D5),
+    primaryContainer = WhatsAppGreenLight,
     onPrimaryContainer = Color(0xFF002018),
-    secondary = WhatsAppGreenAccent,
+    secondary = WhatsAppGreenPrimary,
     onSecondary = Color.White,
-    background = Color.White,
-    onBackground = Color(0xFF191C1B),
-    surface = Color.White,
-    onSurface = Color(0xFF191C1B),
-    surfaceVariant = Color(0xFFDBE5DE),
-    onSurfaceVariant = Color(0xFF3F4945)
+    background = WhatsAppBackgroundLight,
+    onBackground = WhatsAppTextPrimaryLight,
+    surface = WhatsAppSurfaceLight,
+    onSurface = WhatsAppTextPrimaryLight,
+    surfaceVariant = Color(0xFFF0F2F5),
+    onSurfaceVariant = WhatsAppTextSecondaryLight,
+    outlineVariant = WhatsAppDividerLight
 )
 
 @Composable

@@ -27,8 +27,7 @@ import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
-import com.example.ui.theme.WhatsAppGreenAccent
-import com.example.ui.theme.WhatsAppTeal
+import com.example.ui.theme.*
 
 data class AvatarPresetItem(
     val id: String,
@@ -164,13 +163,13 @@ fun UserAvatar(
         }
     } else {
         Box(
-            modifier = avatarModifier.background(WhatsAppTeal.copy(alpha = 0.15f)),
+            modifier = avatarModifier.background(MaterialTheme.colorScheme.surfaceVariant),
             contentAlignment = Alignment.Center
         ) {
             Icon(
                 imageVector = Icons.Default.Person,
                 contentDescription = displayName,
-                tint = WhatsAppTeal,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
                 modifier = Modifier.size(iconSize)
             )
         }

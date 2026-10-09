@@ -39,10 +39,7 @@ import com.example.data.entity.MessageEntity
 import com.example.ui.components.AddContactDialog
 import com.example.ui.components.ChatBubble
 import androidx.compose.ui.text.style.TextOverflow
-import com.example.ui.theme.LocalAppDimensions
-import com.example.ui.theme.WhatsAppChatBgLight
-import com.example.ui.theme.WhatsAppGreenAccent
-import com.example.ui.theme.WhatsAppTeal
+import com.example.ui.theme.*
 import com.example.util.ImageMediaUtil
 import com.example.util.VoiceMessageHelper
 import kotlinx.coroutines.delay
@@ -138,113 +135,120 @@ fun ChatDetailScreen(
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        UserAvatar(
-                            avatarUri = contact.avatarUri,
-                            displayName = contact.displayName.ifBlank { contact.phoneNumber },
-                            size = dims.avatarSmall
-                        )
-                        Spacer(modifier = Modifier.width(dims.itemSpacing))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = contact.displayName.ifBlank { "Contacto" },
-                                color = Color.White,
-                                fontSize = dims.bodySize,
-                                fontWeight = FontWeight.Bold,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
+            Column {
+                TopAppBar(
+                    title = {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            UserAvatar(
+                                avatarUri = contact.avatarUri,
+                                displayName = contact.displayName.ifBlank { contact.phoneNumber },
+                                size = dims.avatarSmall
                             )
-                            val subtext = when {
-                                activeTypingPhone == contact.phoneNumber -> "Escribiendo..."
-                                activeRecordingPhone == contact.phoneNumber -> "Grabando audio..."
-                                contact.isConnected -> "En línea • P2P"
-                                else -> "Desconectado"
+                            Spacer(modifier = Modifier.width(dims.itemSpacing))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = contact.displayName.ifBlank { "Contacto" },
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    fontSize = dims.bodySize,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                val subtext = when {
+                                    activeTypingPhone == contact.phoneNumber -> "escribiendo..."
+                                    activeRecordingPhone == contact.phoneNumber -> "grabando audio..."
+                                    contact.isConnected -> "en línea"
+                                    else -> "desconectado"
+                                }
+                                Text(
+                                    text = subtext,
+                                    color = if (activeTypingPhone == contact.phoneNumber || activeRecordingPhone == contact.phoneNumber || contact.isConnected) {
+                                        WhatsAppGreenPrimary
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurfaceVariant
+                                    },
+                                    fontSize = dims.tinySize,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
                             }
-                            Text(
-                                text = "${contact.phoneNumber} • $subtext",
-                                color = if (activeTypingPhone == contact.phoneNumber || activeRecordingPhone == contact.phoneNumber) {
-                                    WhatsAppGreenAccent
-                                } else {
-                                    Color.White.copy(alpha = 0.85f)
-                                },
-                                fontSize = dims.tinySize,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
+                        }
+                    },
+                    navigationIcon = {
+                        IconButton(
+                            onClick = onBackClick,
+                            modifier = Modifier.testTag("chat_back_button")
+                        ) {
+                            Icon(
+                                Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = "Atrás",
+                                tint = MaterialTheme.colorScheme.onSurface
                             )
                         }
-                    }
-                },
-                navigationIcon = {
-                    IconButton(
-                        onClick = onBackClick,
-                        modifier = Modifier.testTag("chat_back_button")
-                    ) {
-                        Icon(
-                            Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Atrás",
-                            tint = Color.White
-                        )
-                    }
-                },
-                actions = {
-                    IconButton(
-                        onClick = onVideoCallClick,
-                        modifier = Modifier.testTag("chat_video_call_button")
-                    ) {
-                        Icon(
-                            Icons.Default.Videocam,
-                            contentDescription = "Videollamada",
-                            tint = Color.White
-                        )
-                    }
-                    IconButton(
-                        onClick = onAudioCallClick,
-                        modifier = Modifier.testTag("chat_audio_call_button")
-                    ) {
-                        Icon(
-                            Icons.Default.Call,
-                            contentDescription = "Llamada",
-                            tint = Color.White
-                        )
-                    }
-                    IconButton(onClick = { menuExpanded = true }) {
-                        Icon(
-                            Icons.Default.MoreVert,
-                            contentDescription = "Más opciones",
-                            tint = Color.White
-                        )
-                    }
-                    DropdownMenu(
-                        expanded = menuExpanded,
-                        onDismissRequest = { menuExpanded = false }
-                    ) {
-                        DropdownMenuItem(
-                            text = { Text(if (!isContactSaved) "Guardar en Contactos" else "Editar Nombre") },
-                            leadingIcon = { Icon(Icons.Default.PersonAdd, contentDescription = null, tint = WhatsAppTeal) },
-                            onClick = {
-                                menuExpanded = false
-                                showAddContactDialog = true
-                            }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("Ver detalles") },
-                            leadingIcon = { Icon(Icons.Default.Info, contentDescription = null) },
-                            onClick = { menuExpanded = false }
-                        )
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = WhatsAppTeal,
-                    titleContentColor = Color.White,
-                    navigationIconContentColor = Color.White,
-                    actionIconContentColor = Color.White
+                    },
+                    actions = {
+                        IconButton(
+                            onClick = onVideoCallClick,
+                            modifier = Modifier.testTag("chat_video_call_button")
+                        ) {
+                            Icon(
+                                Icons.Default.Videocam,
+                                contentDescription = "Videollamada",
+                                tint = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                        IconButton(
+                            onClick = onAudioCallClick,
+                            modifier = Modifier.testTag("chat_audio_call_button")
+                        ) {
+                            Icon(
+                                Icons.Default.Call,
+                                contentDescription = "Llamada",
+                                tint = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                        IconButton(onClick = { menuExpanded = true }) {
+                            Icon(
+                                Icons.Default.MoreVert,
+                                contentDescription = "Más opciones",
+                                tint = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                        DropdownMenu(
+                            expanded = menuExpanded,
+                            onDismissRequest = { menuExpanded = false },
+                            modifier = Modifier.background(MaterialTheme.colorScheme.surface)
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text(if (!isContactSaved) "Guardar en Contactos" else "Editar Nombre") },
+                                leadingIcon = { Icon(Icons.Default.PersonAdd, contentDescription = null, tint = WhatsAppGreenPrimary) },
+                                onClick = {
+                                    menuExpanded = false
+                                    showAddContactDialog = true
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Ver detalles") },
+                                leadingIcon = { Icon(Icons.Default.Info, contentDescription = null) },
+                                onClick = { menuExpanded = false }
+                            )
+                        }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = MaterialTheme.colorScheme.surface,
+                        titleContentColor = MaterialTheme.colorScheme.onSurface,
+                        navigationIconContentColor = MaterialTheme.colorScheme.onSurface,
+                        actionIconContentColor = MaterialTheme.colorScheme.onSurface
+                    )
                 )
-            )
+                HorizontalDivider(
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+                    thickness = 0.6.dp
+                )
+            }
         },
         modifier = modifier
             .fillMaxSize()
@@ -256,7 +260,7 @@ fun ChatDetailScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(paddingValues)
-                .background(WhatsAppChatBgLight)
+                .background(if (androidx.compose.foundation.isSystemInDarkTheme()) com.example.ui.theme.WhatsAppChatBgDark else WhatsAppChatBgLight)
         ) {
             // Background Wallpaper
             Image(
@@ -264,46 +268,47 @@ fun ChatDetailScreen(
                 contentDescription = null,
                 modifier = Modifier.fillMaxSize(),
                 contentScale = ContentScale.Crop,
-                alpha = 0.4f
+                alpha = if (androidx.compose.foundation.isSystemInDarkTheme()) 0.15f else 0.45f
             )
 
             Column(modifier = Modifier.fillMaxSize()) {
                 // Banner para números no guardados
                 if (!isContactSaved) {
                     Surface(
-                        color = Color.White.copy(alpha = 0.95f),
-                        shadowElevation = 2.dp,
+                        color = MaterialTheme.colorScheme.surface,
+                        shadowElevation = 1.dp,
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = 12.dp, vertical = 6.dp),
+                                .padding(horizontal = 14.dp, vertical = 8.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
                                     text = "Número no guardado en contactos",
-                                    fontSize = 12.sp,
+                                    fontSize = 13.sp,
                                     fontWeight = FontWeight.SemiBold,
-                                    color = WhatsAppTeal
+                                    color = MaterialTheme.colorScheme.onSurface
                                 )
                                 Text(
                                     text = contact.phoneNumber,
-                                    fontSize = 11.sp,
+                                    fontSize = 12.sp,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
                             Button(
                                 onClick = { showAddContactDialog = true },
-                                colors = ButtonDefaults.buttonColors(containerColor = WhatsAppTeal),
-                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = WhatsAppGreenPrimary),
+                                shape = RoundedCornerShape(18.dp),
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
                                 modifier = Modifier.testTag("add_contact_chat_banner_btn")
                             ) {
-                                Icon(Icons.Default.PersonAdd, contentDescription = null, modifier = Modifier.size(14.dp))
+                                Icon(Icons.Default.PersonAdd, contentDescription = null, modifier = Modifier.size(16.dp))
                                 Spacer(modifier = Modifier.width(4.dp))
-                                Text("Agregar", fontSize = 12.sp)
+                                Text("Añadir", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                             }
                         }
                     }
@@ -318,6 +323,41 @@ fun ChatDetailScreen(
                         .padding(horizontal = 8.dp),
                     contentPadding = PaddingValues(vertical = 8.dp)
                 ) {
+                    // Cifrado estilo WhatsApp al inicio del historial
+                    item {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 24.dp, vertical = 10.dp),
+                            horizontalArrangement = Arrangement.Center
+                        ) {
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = if (androidx.compose.foundation.isSystemInDarkTheme()) Color(0xFF182229) else Color(0xFFFFF7DC),
+                                shadowElevation = 0.5.dp
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Lock,
+                                        contentDescription = null,
+                                        tint = if (androidx.compose.foundation.isSystemInDarkTheme()) Color(0xFFFDCB58) else Color(0xFF9E7C00),
+                                        modifier = Modifier.size(11.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = "Los mensajes en este chat están protegidos de extremo a extremo en la malla offline P2P.",
+                                        fontSize = 11.sp,
+                                        color = if (androidx.compose.foundation.isSystemInDarkTheme()) Color(0xFFE9EDEF) else Color(0xFF54656F),
+                                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                                    )
+                                }
+                            }
+                        }
+                    }
+
                     items(messages) { msg ->
                         ChatBubble(message = msg)
                     }
@@ -447,7 +487,7 @@ fun ChatDetailScreen(
                                     }
                                 }
                             },
-                            containerColor = WhatsAppTeal,
+                            containerColor = WhatsAppGreenPrimary,
                             contentColor = Color.White,
                             shape = CircleShape,
                             modifier = Modifier

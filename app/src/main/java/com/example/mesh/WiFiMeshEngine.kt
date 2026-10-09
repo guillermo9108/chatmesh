@@ -89,8 +89,9 @@ class WiFiMeshEngine(
     private val _storiesUpdated = MutableStateFlow(0L)
     val storiesUpdated: StateFlow<Long> = _storiesUpdated.asStateFlow()
 
-    private var p2pManager: WifiP2pManager? = null
-    private var p2pChannel: WifiP2pManager.Channel? = null
+    val p2pCoreManager: P2PManager = P2PManager.getInstance(context)
+    val p2pManager: WifiP2pManager? get() = p2pCoreManager.getManager()
+    val p2pChannel: WifiP2pManager.Channel? get() = p2pCoreManager.getChannel()
     private var isP2pReceiverRegistered = false
 
     @Volatile
@@ -579,47 +580,62 @@ class WiFiMeshEngine(
     // ============================================================
     private fun setupP2p(ssid: String) {
         try {
-            p2pManager = context.getSystemService(Context.WIFI_P2P_SERVICE) as? WifiP2pManager
-            p2pChannel = p2pManager?.initialize(context, context.mainLooper, null)
-
-            val filter = IntentFilter().apply {
-                addAction(WifiP2pManager.WIFI_P2P_STATE_CHANGED_ACTION)
-                addAction(WifiP2pManager.WIFI_P2P_PEERS_CHANGED_ACTION)
-                addAction(WifiP2pManager.WIFI_P2P_CONNECTION_CHANGED_ACTION)
-                addAction(WifiP2pManager.WIFI_P2P_THIS_DEVICE_CHANGED_ACTION)
-            }
-            if (!isP2pReceiverRegistered) {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                    context.registerReceiver(
-                        p2pReceiver,
-                        filter,
-                        Context.RECEIVER_NOT_EXPORTED
-                    )
-                } else {
-                    @Suppress("UnspecifiedRegisterReceiverFlag")
-                    context.registerReceiver(p2pReceiver, filter)
-                }
-                isP2pReceiverRegistered = true
-            }
-
+            p2pCoreManager.initialize()
             setDeviceP2pName(ssid)
+
+            // Observar peers reactivamente desde P2PManager
+            scope.launch {
+                p2pCoreManager.peers.collect { deviceList ->
+                    _engineState.value = _engineState.value.copy(discoveredP2pDevices = deviceList)
+                    deviceList.forEach { dev ->
+                        handleDiscoveredP2pDevice(dev, dev.status == WifiP2pDevice.CONNECTED)
+                    }
+                    evaluateAndAutoConnectToBestNode()
+                }
+            }
+
+            // Observar estado de conexión reactivamente desde P2PManager
+            scope.launch {
+                p2pCoreManager.connectionInfo.collect { info ->
+                    if (info != null && info.groupFormed) {
+                        val ownerIp = info.groupOwnerAddress?.hostAddress ?: "192.168.49.1"
+                        if (info.isGroupOwner) {
+                            _engineState.value = _engineState.value.copy(
+                                isWifiDirectActive = true,
+                                isGroupOwner = true,
+                                localIpAddress = ownerIp
+                            )
+                        } else {
+                            val myLocalIp = getP2pInterfaceAddress() ?: "192.168.49.2"
+                            _engineState.value = _engineState.value.copy(
+                                isWifiDirectActive = true,
+                                isGroupOwner = false,
+                                localIpAddress = myLocalIp
+                            )
+                            connectToMeshSocket(ownerIp, TCP_MESH_PORT)
+                        }
+                    } else if (info == null && _engineState.value.isWifiDirectActive) {
+                        onP2pGroupLost()
+                    }
+                }
+            }
+
+            // Observar activación de Wi-Fi P2P
+            scope.launch {
+                p2pCoreManager.isWifiP2pEnabled.collect { isEnabled ->
+                    _engineState.value = _engineState.value.copy(isWifiDirectActive = isEnabled)
+                }
+            }
+
             setupP2pDnsSdService(ssid)
             startP2pDiscovery()
         } catch (e: Exception) {
-            Log.e(TAG, "Error iniciando WiFi Direct", e)
+            Log.e(TAG, "Error iniciando WiFi Direct con P2PManager", e)
         }
     }
 
     private fun setDeviceP2pName(name: String) {
-        try {
-            val method = p2pManager?.javaClass?.getMethod(
-                "setDeviceName",
-                WifiP2pManager.Channel::class.java,
-                String::class.java,
-                WifiP2pManager.ActionListener::class.java
-            )
-            method?.invoke(p2pManager, p2pChannel, name, null)
-        } catch (_: Exception) {}
+        p2pCoreManager.setDeviceName(name)
     }
 
     private fun setupP2pDnsSdService(ssid: String) {
@@ -629,24 +645,17 @@ class WiFiMeshEngine(
                 "phone" to _engineState.value.myPhoneNumber,
                 "ssid" to ssid
             )
-            val serviceInfo = WifiP2pDnsSdServiceInfo.newInstance("ChatMesh", "_chatmesh._tcp", record)
-            p2pManager?.addLocalService(p2pChannel, serviceInfo, null)
-
-            p2pManager?.setDnsSdResponseListeners(p2pChannel,
-                { _, _, device ->
-                    handleDiscoveredP2pDevice(device, device.status == WifiP2pDevice.CONNECTED)
-                },
-                { _, txtRecord, device ->
-                    val phone = txtRecord["phone"]
-                    if (!phone.isNullOrBlank()) {
-                        registerNodeFromDnsSd(device.deviceName ?: "Nodo", phone, device.deviceAddress)
-                    }
+            p2pCoreManager.setupDnsSdService(record)
+            p2pCoreManager.discoverServices { _, txtRecord, device ->
+                val phone = txtRecord["phone"]
+                if (!phone.isNullOrBlank()) {
+                    registerNodeFromDnsSd(device.deviceName ?: "Nodo", phone, device.deviceAddress)
                 }
-            )
-            val serviceRequest = WifiP2pDnsSdServiceRequest.newInstance()
-            p2pManager?.addServiceRequest(p2pChannel, serviceRequest, null)
-            p2pManager?.discoverServices(p2pChannel, null)
-        } catch (_: Exception) {}
+                handleDiscoveredP2pDevice(device, device.status == WifiP2pDevice.CONNECTED)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error configurando DNS-SD", e)
+        }
     }
 
     private fun registerNodeFromDnsSd(name: String, phone: String, macAddress: String) {
@@ -669,11 +678,10 @@ class WiFiMeshEngine(
 
     fun reCreateP2pGroup() {
         val currentSsid = _engineState.value.ssid
-        val ch = p2pChannel ?: return
-        p2pManager?.removeGroup(ch, object : WifiP2pManager.ActionListener {
-            override fun onSuccess() = createAutonomousP2pGroup(currentSsid)
-            override fun onFailure(reason: Int) = createAutonomousP2pGroup(currentSsid)
-        })
+        p2pCoreManager.removeGroup(
+            onSuccess = { createAutonomousP2pGroup(currentSsid) },
+            onFailure = { createAutonomousP2pGroup(currentSsid) }
+        )
     }
 
     fun createAutonomousP2pGroup(ssid: String) {
@@ -686,9 +694,8 @@ class WiFiMeshEngine(
                     .setNetworkName(netName)
                     .setPassphrase(MESH_GLOBAL_PASSPHRASE)
                     .build()
-                val ch = p2pChannel ?: return
-                p2pManager?.createGroup(ch, config, object : WifiP2pManager.ActionListener {
-                    override fun onSuccess() {
+                p2pCoreManager.createGroup(config,
+                    onSuccess = {
                         Log.i(TAG, "Grupo WiFi Direct creado: $netName")
                         _engineState.value = _engineState.value.copy(
                             isWifiDirectActive = true,
@@ -698,12 +705,12 @@ class WiFiMeshEngine(
                             localIpAddress = "192.168.49.1"
                         )
                         requestGroupAndConnectionDetails()
-                    }
-                    override fun onFailure(reason: Int) {
+                    },
+                    onFailure = { reason ->
                         Log.w(TAG, "createGroup con config falló ($reason), fallback")
                         fallbackCreateGroup()
                     }
-                })
+                )
                 return
             } catch (e: Exception) {
                 Log.w(TAG, "Error usando WifiP2pConfig.Builder", e)
@@ -713,9 +720,8 @@ class WiFiMeshEngine(
     }
 
     private fun fallbackCreateGroup() {
-        val ch = p2pChannel ?: return
-        p2pManager?.createGroup(ch, object : WifiP2pManager.ActionListener {
-            override fun onSuccess() {
+        p2pCoreManager.createGroup(null,
+            onSuccess = {
                 Log.i(TAG, "Grupo WiFi Direct estándar creado")
                 _engineState.value = _engineState.value.copy(
                     isWifiDirectActive = true,
@@ -723,12 +729,12 @@ class WiFiMeshEngine(
                     localIpAddress = "192.168.49.1"
                 )
                 requestGroupAndConnectionDetails()
-            }
-            override fun onFailure(reason: Int) {
+            },
+            onFailure = { reason ->
                 Log.w(TAG, "createGroup falló ($reason), iniciando descubrimiento")
                 startP2pDiscovery()
             }
-        })
+        )
     }
 
     private fun getP2pInterfaceAddress(): String? {
@@ -794,42 +800,21 @@ class WiFiMeshEngine(
     }
 
     fun startP2pDiscovery() {
-        val p2pService = WifiDirectP2pService.instance
-        if (p2pService != null) {
-            p2pService.startPeerDiscovery(object : WifiP2pManager.ActionListener {
-                override fun onSuccess() {
-                    _engineState.value = _engineState.value.copy(
-                        autoConnectStatus = "Escaneando dispositivos WiFi Direct..."
-                    )
-                }
-                override fun onFailure(reason: Int) {
-                    _engineState.value = _engineState.value.copy(
-                        autoConnectStatus = "Descubrimiento falló ($reason)"
-                    )
-                }
-            })
-            return
-        }
-        val ch = p2pChannel ?: return
-        try {
-            p2pManager?.discoverPeers(ch, object : WifiP2pManager.ActionListener {
-                override fun onSuccess() {
-                    _engineState.value = _engineState.value.copy(
-                        autoConnectStatus = "Escaneando dispositivos WiFi Direct..."
-                    )
-                }
-                override fun onFailure(reason: Int) {
-                    _engineState.value = _engineState.value.copy(
-                        autoConnectStatus = "Descubrimiento falló ($reason)"
-                    )
-                }
-            })
-        } catch (_: Exception) {}
+        p2pCoreManager.discoverPeers(
+            onSuccess = {
+                _engineState.value = _engineState.value.copy(
+                    autoConnectStatus = "Escaneando dispositivos WiFi Direct..."
+                )
+            },
+            onFailure = { reason ->
+                _engineState.value = _engineState.value.copy(
+                    autoConnectStatus = "Descubrimiento falló ($reason)"
+                )
+            }
+        )
     }
 
     fun connectToPeer(device: WifiP2pDevice) {
-        val ch = p2pChannel ?: return
-
         @Suppress("DEPRECATION")
         val config = WifiP2pConfig().apply {
             deviceAddress = device.deviceAddress
@@ -840,43 +825,48 @@ class WiFiMeshEngine(
         // Si el otro ya está anunciado como GO autónomo en el discovery, conectar
         // con PBC debería ser silencioso. PBC es el modo que menos diálogos genera.
         if (_engineState.value.isGroupOwner && _engineState.value.connectedPeersCount == 0) {
-            p2pManager?.removeGroup(ch, object : WifiP2pManager.ActionListener {
-                override fun onSuccess() = doConnect(config, device.deviceName)
-                override fun onFailure(reason: Int) = doConnect(config, device.deviceName)
-            })
+            p2pCoreManager.removeGroup(
+                onSuccess = { doConnect(config, device.deviceName) },
+                onFailure = { doConnect(config, device.deviceName) }
+            )
         } else {
             doConnect(config, device.deviceName)
         }
     }
 
     private fun doConnect(config: WifiP2pConfig, deviceName: String?) {
-        val p2pService = WifiDirectP2pService.instance
-        if (p2pService != null) {
-            p2pService.connect(config, object : WifiP2pManager.ActionListener {
-                override fun onSuccess() {
-                    Log.i(TAG, "Conexión WiFi Direct vía P2pService iniciada con $deviceName")
-                    _engineState.value = _engineState.value.copy(
-                        autoConnectStatus = "Conectando a ${deviceName ?: "dispositivo"}..."
-                    )
-                }
-                override fun onFailure(reason: Int) {
-                    Log.w(TAG, "Fallo al conectar con $deviceName vía P2pService: $reason")
-                }
-            })
-            return
-        }
-        val ch = p2pChannel ?: return
-        p2pManager?.connect(ch, config, object : WifiP2pManager.ActionListener {
-            override fun onSuccess() {
+        _engineState.value = _engineState.value.copy(
+            autoConnectStatus = "Conectando a ${deviceName ?: "dispositivo"}..."
+        )
+        p2pCoreManager.connect(
+            config = config,
+            onSuccess = {
                 Log.i(TAG, "Conexión WiFi Direct iniciada con $deviceName")
                 _engineState.value = _engineState.value.copy(
                     autoConnectStatus = "Conectando a ${deviceName ?: "dispositivo"}..."
                 )
-            }
-            override fun onFailure(reason: Int) {
+            },
+            onFailure = { reason ->
                 Log.w(TAG, "Fallo al conectar con $deviceName: $reason")
+                _engineState.value = _engineState.value.copy(
+                    autoConnectStatus = "Error conectando ($reason)"
+                )
             }
-        })
+        )
+    }
+
+    fun disconnectP2p() {
+        p2pCoreManager.disconnect(
+            onSuccess = {
+                _engineState.value = _engineState.value.copy(
+                    isWifiDirectActive = false,
+                    isGroupOwner = false,
+                    connectedPeersCount = 0,
+                    autoConnectStatus = "Desconectado"
+                )
+                scope.launch { onP2pGroupLost() }
+            }
+        )
     }
 
     fun evaluateAndAutoConnectToBestNode() {
@@ -2290,8 +2280,8 @@ class WiFiMeshEngine(
         scope.launch {
             // Liberar temporalmente el grupo y detener escaneo P2P para evitar conflicto en el chip de radio Wi-Fi
             try {
-                p2pManager?.stopPeerDiscovery(p2pChannel, null)
-                p2pManager?.removeGroup(p2pChannel, null)
+                p2pCoreManager.stopPeerDiscovery()
+                p2pCoreManager.removeGroup()
             } catch (_: Exception) {}
 
             // Pausa breve para que el controlador de radio de Android libere la interfaz P2P
@@ -2530,12 +2520,7 @@ class WiFiMeshEngine(
                 }
 
                 Log.i(TAG, "Soy el mejor candidato por BLE (score=${myProfile.score}). Autoproclamando Group Owner.")
-                val ch = p2pChannel ?: run {
-                    _engineState.value = _engineState.value.copy(isBleNegotiatingGo = false)
-                    return@launch
-                }
-
-                p2pManager?.requestGroupInfo(ch) { group ->
+                p2pCoreManager.requestGroupInfo { group ->
                     if (group != null && group.isGroupOwner) {
                         Log.i(TAG, "Ya somos Group Owner, omitiendo recreación")
                         _engineState.value = _engineState.value.copy(isBleNegotiatingGo = false)
@@ -2563,7 +2548,7 @@ class WiFiMeshEngine(
             callTimerJob?.cancel()
             networkMonitorJob?.cancel()
             if (isP2pReceiverRegistered) {
-                context.unregisterReceiver(p2pReceiver)
+                try { context.unregisterReceiver(p2pReceiver) } catch (_: Exception) {}
                 isP2pReceiverRegistered = false
             }
             serverSocket?.close()
@@ -2573,7 +2558,8 @@ class WiFiMeshEngine(
             activeClientSockets.clear()
             socketWriters.clear()
             socketMutexes.clear()
-            p2pManager?.removeGroup(p2pChannel, null)
+            p2pCoreManager.removeGroup()
+            p2pCoreManager.destroy()
             hotspotManager.stop()
             try {
                 if (multicastLock?.isHeld == true) {

@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.BatteryChargingFull
 import androidx.compose.material.icons.filled.Bluetooth
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Refresh
@@ -25,6 +26,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.mesh.MeshEngineState
 import com.example.mesh.MeshTransport
+import com.example.mesh.P2PManager
 import com.example.ui.theme.LocalAppDimensions
 import com.example.ui.theme.WhatsAppGreenAccent
 import com.example.ui.theme.WhatsAppTeal
@@ -690,6 +692,68 @@ fun MeshSettingsDialog(
                                     fontSize = 11.sp,
                                     color = WhatsAppTeal
                                 )
+                            }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                // ==========================================
+                // SECCIÓN 5: OPTIMIZACIÓN DE BATERÍA (Malla en 2do Plano)
+                // ==========================================
+                Text(
+                    text = "5. Batería y Malla en Segundo Plano:",
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 13.sp
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+
+                var isIgnoringBattery by remember {
+                    mutableStateOf(P2PManager.isIgnoringBatteryOptimizations(context))
+                }
+
+                Card(
+                    colors = CardDefaults.cardColors(
+                        containerColor = if (isIgnoringBattery) WhatsAppGreenAccent.copy(alpha = 0.1f) else MaterialTheme.colorScheme.surfaceVariant
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                Icons.Default.BatteryChargingFull,
+                                contentDescription = null,
+                                tint = if (isIgnoringBattery) WhatsAppTeal else Color.Gray,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = if (isIgnoringBattery) "Ahorro de batería desactivado: ÓPTIMO" else "Optimización de batería: ACTIVA",
+                                fontWeight = FontWeight.Medium,
+                                fontSize = 13.sp
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = if (isIgnoringBattery)
+                                "ChatMesh puede mantener sockets WiFi Direct y escaneo Bluetooth funcionando con la pantalla apagada."
+                            else
+                                "Android puede suspender las conexiones Wi-Fi Direct y BLE si el ahorro de batería está activado para esta aplicación.",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        if (!isIgnoringBattery) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Button(
+                                onClick = {
+                                    P2PManager.requestIgnoreBatteryOptimizations(context)
+                                    isIgnoringBattery = P2PManager.isIgnoringBatteryOptimizations(context)
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = WhatsAppTeal),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text("Permitir operar en 2do plano", fontSize = 12.sp)
                             }
                         }
                     }

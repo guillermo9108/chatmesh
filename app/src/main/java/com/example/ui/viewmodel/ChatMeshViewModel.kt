@@ -440,6 +440,7 @@ class ChatMeshViewModel(application: Application) : AndroidViewModel(application
     fun reCreateWiFiDirectGroup() { meshEngine.reCreateP2pGroup() }
     fun scanP2pPeers() { meshEngine.startP2pDiscovery() }
     fun connectToP2pDevice(device: WifiP2pDevice) { meshEngine.connectToPeer(device) }
+    fun disconnectP2pDevice() { meshEngine.disconnectP2p() }
 
     fun setRecording(isRecording: Boolean, seconds: Int = 0) {
         val contact = _selectedContact.value

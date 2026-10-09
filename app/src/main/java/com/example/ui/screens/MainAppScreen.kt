@@ -9,21 +9,34 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.mesh.MeshTransport
 import com.example.ui.components.AddContactDialog
 import com.example.ui.components.GitHubInfoDialog
 import com.example.ui.components.MeshSettingsDialog
 import com.example.ui.components.SimConfigDialog
 import com.example.ui.components.VideoQualityDialog
 import com.example.ui.components.WhatsAppTopBar
-import com.example.ui.theme.LocalAppDimensions
+import com.example.ui.theme.*
 import com.example.ui.viewmodel.ChatMeshViewModel
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainAppScreen(
     viewModel: ChatMeshViewModel,
@@ -58,6 +71,11 @@ fun MainAppScreen(
     val videoQuality by viewModel.videoQuality.collectAsStateWithLifecycle()
 
     var selectedTabIndex by remember { mutableIntStateOf(0) }
+    var showContactsSheet by remember { mutableStateOf(false) }
+    var selectedFilterChip by remember { mutableStateOf("Todos") }
+    var isSearchActive by remember { mutableStateOf(false) }
+    var searchQueryText by remember { mutableStateOf("") }
+
     var showProfileDialog by remember { mutableStateOf(false) }
     var showSimConfigDialog by remember { mutableStateOf(false) }
     var showAddContactDialog by remember { mutableStateOf(false) }
@@ -90,7 +108,14 @@ fun MainAppScreen(
     BackHandler(enabled = viewingStoryAuthorPhone == null && !showStoryCreateScreen && selectedContact != null) {
         viewModel.selectContact(null)
     }
-    BackHandler(enabled = viewingStoryAuthorPhone == null && !showStoryCreateScreen && selectedContact == null && selectedTabIndex != 0) {
+    BackHandler(enabled = viewingStoryAuthorPhone == null && !showStoryCreateScreen && selectedContact == null && showContactsSheet) {
+        showContactsSheet = false
+    }
+    BackHandler(enabled = viewingStoryAuthorPhone == null && !showStoryCreateScreen && selectedContact == null && !showContactsSheet && isSearchActive) {
+        isSearchActive = false
+        searchQueryText = ""
+    }
+    BackHandler(enabled = viewingStoryAuthorPhone == null && !showStoryCreateScreen && selectedContact == null && !showContactsSheet && !isSearchActive && selectedTabIndex != 0) {
         selectedTabIndex = 0
     }
 
@@ -227,71 +252,395 @@ fun MainAppScreen(
                 )
             }
 
-            // PRIORIDAD 5: Pantalla principal con tabs
+            // PRIORIDAD 5: Pantalla principal con apariencia moderna de WhatsApp
             else -> {
-                Column(
+                Scaffold(
+                    topBar = {
+                        if (showContactsSheet) {
+                            Column {
+                                TopAppBar(
+                                    title = {
+                                        Column {
+                                            Text(
+                                                text = "Seleccionar contacto",
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 18.sp,
+                                                color = MaterialTheme.colorScheme.onSurface
+                                            )
+                                            Text(
+                                                text = "${allContacts.size} contactos",
+                                                fontSize = 12.sp,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                    },
+                                    navigationIcon = {
+                                        IconButton(onClick = { showContactsSheet = false }) {
+                                            Icon(
+                                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                                contentDescription = "Atrás",
+                                                tint = MaterialTheme.colorScheme.onSurface
+                                            )
+                                        }
+                                    },
+                                    actions = {
+                                        IconButton(onClick = { viewModel.refreshContacts() }) {
+                                            Icon(
+                                                imageVector = Icons.Default.Refresh,
+                                                contentDescription = "Actualizar",
+                                                tint = MaterialTheme.colorScheme.onSurface
+                                            )
+                                        }
+                                        IconButton(onClick = { showAddContactDialog = true }) {
+                                            Icon(
+                                                imageVector = Icons.Default.PersonAdd,
+                                                contentDescription = "Nuevo contacto",
+                                                tint = MaterialTheme.colorScheme.onSurface
+                                            )
+                                        }
+                                    },
+                                    colors = TopAppBarDefaults.topAppBarColors(
+                                        containerColor = MaterialTheme.colorScheme.surface,
+                                        titleContentColor = MaterialTheme.colorScheme.onSurface
+                                    )
+                                )
+                                HorizontalDivider(
+                                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+                                    thickness = 0.6.dp
+                                )
+                            }
+                        } else {
+                            WhatsAppTopBar(
+                                currentTabTitle = when (selectedTabIndex) {
+                                    0 -> "WhatsApp"
+                                    1 -> "Novedades"
+                                    2 -> "Malla P2P"
+                                    3 -> "Llamadas"
+                                    else -> "WhatsApp"
+                                },
+                                selectedFilterChip = selectedFilterChip,
+                                onFilterChipSelected = { chip ->
+                                    if (chip == "Contactos") {
+                                        showContactsSheet = true
+                                    } else {
+                                        selectedFilterChip = chip
+                                    }
+                                },
+                                showFilterChips = (selectedTabIndex == 0),
+                                isSearchActive = isSearchActive,
+                                searchQuery = searchQueryText,
+                                onSearchQueryChange = { searchQueryText = it },
+                                onSearchActiveChange = { isSearchActive = it },
+                                onCameraClick = { showStoryCreateScreen = true },
+                                onProfileClick = { showProfileDialog = true },
+                                onSyncContactsClick = { viewModel.refreshContacts() },
+                                onSimConfigClick = { showSimConfigDialog = true },
+                                onMeshSettingsClick = { showMeshSettingsDialog = true },
+                                onGitHubClick = { showGitHubDialog = true },
+                                onVideoQualityClick = { showVideoQualityDialog = true },
+                                onShareAppClick = { shareApp(context) },
+                                currentVideoQuality = videoQuality,
+                                connectedNodesCount = engineState.connectedPeersCount,
+                                ssidName = engineState.ssid,
+                                isWifiDirectActive = engineState.transport == MeshTransport.WIFI_DIRECT,
+                                isHotspotActive = engineState.isHotspotActive || engineState.transport == MeshTransport.HOTSPOT
+                            )
+                        }
+                    },
+                    bottomBar = {
+                        if (!showContactsSheet) {
+                            NavigationBar(
+                                containerColor = MaterialTheme.colorScheme.surface,
+                                tonalElevation = 0.dp,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("whatsapp_bottom_navigation")
+                            ) {
+                                val unreadChats = chatContacts.sumOf { it.unreadCount }
+
+                                // 1. Chats
+                                NavigationBarItem(
+                                    selected = selectedTabIndex == 0,
+                                    onClick = { selectedTabIndex = 0 },
+                                    icon = {
+                                        BadgedBox(
+                                            badge = {
+                                                if (unreadChats > 0) {
+                                                    Badge(
+                                                        containerColor = WhatsAppGreenPrimary,
+                                                        contentColor = Color.White
+                                                    ) {
+                                                        Text("$unreadChats", fontWeight = FontWeight.Bold, fontSize = 10.sp)
+                                                    }
+                                                }
+                                            }
+                                        ) {
+                                            Icon(
+                                                imageVector = if (selectedTabIndex == 0) Icons.Filled.Chat else Icons.Outlined.Chat,
+                                                contentDescription = "Chats"
+                                            )
+                                        }
+                                    },
+                                    label = {
+                                        Text(
+                                            text = "Chats",
+                                            fontWeight = if (selectedTabIndex == 0) FontWeight.Bold else FontWeight.Normal,
+                                            fontSize = 12.sp
+                                        )
+                                    },
+                                    colors = NavigationBarItemDefaults.colors(
+                                        indicatorColor = WhatsAppChipSelectedLight,
+                                        selectedIconColor = WhatsAppGreenDark,
+                                        selectedTextColor = MaterialTheme.colorScheme.onSurface,
+                                        unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                )
+
+                                // 2. Novedades (Estados)
+                                NavigationBarItem(
+                                    selected = selectedTabIndex == 1,
+                                    onClick = { selectedTabIndex = 1 },
+                                    icon = {
+                                        BadgedBox(
+                                            badge = {
+                                                if (unreadStoriesCount > 0) {
+                                                    Badge(
+                                                        containerColor = WhatsAppGreenPrimary,
+                                                        modifier = Modifier.size(7.dp)
+                                                    )
+                                                }
+                                            }
+                                        ) {
+                                            Icon(
+                                                imageVector = if (selectedTabIndex == 1) Icons.Filled.CircleNotifications else Icons.Outlined.CircleNotifications,
+                                                contentDescription = "Novedades"
+                                            )
+                                        }
+                                    },
+                                    label = {
+                                        Text(
+                                            text = "Novedades",
+                                            fontWeight = if (selectedTabIndex == 1) FontWeight.Bold else FontWeight.Normal,
+                                            fontSize = 12.sp
+                                        )
+                                    },
+                                    colors = NavigationBarItemDefaults.colors(
+                                        indicatorColor = WhatsAppChipSelectedLight,
+                                        selectedIconColor = WhatsAppGreenDark,
+                                        selectedTextColor = MaterialTheme.colorScheme.onSurface,
+                                        unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                )
+
+                                // 3. Malla P2P
+                                NavigationBarItem(
+                                    selected = selectedTabIndex == 2,
+                                    onClick = { selectedTabIndex = 2 },
+                                    icon = {
+                                        BadgedBox(
+                                            badge = {
+                                                if (engineState.connectedPeersCount > 0) {
+                                                    Badge(
+                                                        containerColor = WhatsAppGreenPrimary,
+                                                        contentColor = Color.White
+                                                    ) {
+                                                        Text("${engineState.connectedPeersCount}", fontWeight = FontWeight.Bold, fontSize = 10.sp)
+                                                    }
+                                                }
+                                            }
+                                        ) {
+                                            Icon(
+                                                imageVector = if (selectedTabIndex == 2) Icons.Filled.Hub else Icons.Outlined.Hub,
+                                                contentDescription = "Malla P2P"
+                                            )
+                                        }
+                                    },
+                                    label = {
+                                        Text(
+                                            text = "Malla P2P",
+                                            fontWeight = if (selectedTabIndex == 2) FontWeight.Bold else FontWeight.Normal,
+                                            fontSize = 12.sp
+                                        )
+                                    },
+                                    colors = NavigationBarItemDefaults.colors(
+                                        indicatorColor = WhatsAppChipSelectedLight,
+                                        selectedIconColor = WhatsAppGreenDark,
+                                        selectedTextColor = MaterialTheme.colorScheme.onSurface,
+                                        unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                )
+
+                                // 4. Llamadas
+                                NavigationBarItem(
+                                    selected = selectedTabIndex == 3,
+                                    onClick = { selectedTabIndex = 3 },
+                                    icon = {
+                                        Icon(
+                                            imageVector = if (selectedTabIndex == 3) Icons.Filled.Call else Icons.Outlined.Call,
+                                            contentDescription = "Llamadas"
+                                        )
+                                    },
+                                    label = {
+                                        Text(
+                                            text = "Llamadas",
+                                            fontWeight = if (selectedTabIndex == 3) FontWeight.Bold else FontWeight.Normal,
+                                            fontSize = 12.sp
+                                        )
+                                    },
+                                    colors = NavigationBarItemDefaults.colors(
+                                        indicatorColor = WhatsAppChipSelectedLight,
+                                        selectedIconColor = WhatsAppGreenDark,
+                                        selectedTextColor = MaterialTheme.colorScheme.onSurface,
+                                        unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                )
+                            }
+                        }
+                    },
+                    floatingActionButton = {
+                        if (!showContactsSheet) {
+                            when (selectedTabIndex) {
+                                0 -> {
+                                    FloatingActionButton(
+                                        onClick = { showContactsSheet = true },
+                                        containerColor = WhatsAppGreenPrimary,
+                                        contentColor = Color.White,
+                                        shape = RoundedCornerShape(16.dp),
+                                        modifier = Modifier.testTag("new_chat_fab")
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Chat,
+                                            contentDescription = "Nuevo chat",
+                                            modifier = Modifier.size(24.dp)
+                                        )
+                                    }
+                                }
+                                1 -> {
+                                    Column(horizontalAlignment = Alignment.End) {
+                                        SmallFloatingActionButton(
+                                            onClick = { showStoryCreateScreen = true },
+                                            containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                                            contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            shape = CircleShape,
+                                            modifier = Modifier.testTag("text_story_fab")
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Edit,
+                                                contentDescription = "Estado de texto",
+                                                modifier = Modifier.size(20.dp)
+                                            )
+                                        }
+                                        Spacer(modifier = Modifier.height(12.dp))
+                                        FloatingActionButton(
+                                            onClick = { showStoryCreateScreen = true },
+                                            containerColor = WhatsAppGreenPrimary,
+                                            contentColor = Color.White,
+                                            shape = RoundedCornerShape(16.dp),
+                                            modifier = Modifier.testTag("camera_story_fab")
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.PhotoCamera,
+                                                contentDescription = "Foto estado",
+                                                modifier = Modifier.size(24.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                                2 -> {
+                                    FloatingActionButton(
+                                        onClick = { viewModel.startP2pDiscovery() },
+                                        containerColor = WhatsAppGreenPrimary,
+                                        contentColor = Color.White,
+                                        shape = RoundedCornerShape(16.dp),
+                                        modifier = Modifier.testTag("scan_mesh_fab")
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Refresh,
+                                            contentDescription = "Escanear red malla",
+                                            modifier = Modifier.size(24.dp)
+                                        )
+                                    }
+                                }
+                                3 -> {
+                                    FloatingActionButton(
+                                        onClick = { showContactsSheet = true },
+                                        containerColor = WhatsAppGreenPrimary,
+                                        contentColor = Color.White,
+                                        shape = RoundedCornerShape(16.dp),
+                                        modifier = Modifier.testTag("new_call_fab")
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Call,
+                                            contentDescription = "Nueva llamada",
+                                            modifier = Modifier.size(24.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    },
                     modifier = Modifier
                         .fillMaxSize()
                         .statusBarsPadding()
                         .navigationBarsPadding()
-                ) {
-                    WhatsAppTopBar(
-                        selectedTabIndex = selectedTabIndex,
-                        onTabSelected = { selectedTabIndex = it },
-                        onSearchClick = { selectedTabIndex = 1 },
-                        onProfileClick = { showProfileDialog = true },
-                        onSyncContactsClick = { viewModel.refreshContacts() },
-                        onSimConfigClick = { showSimConfigDialog = true },
-                        onMeshSettingsClick = { showMeshSettingsDialog = true },
-                        onGitHubClick = { showGitHubDialog = true },
-                        onVideoQualityClick = { showVideoQualityDialog = true },
-                        onShareAppClick = { shareApp(context) },
-                        currentVideoQuality = videoQuality,
-                        unreadChatsCount = chatContacts.sumOf { it.unreadCount },
-                        unreadStoriesCount = unreadStoriesCount,
-                        connectedNodesCount = engineState.connectedPeersCount,
-                        ssidName = engineState.ssid
-                    )
-
-                    Box(modifier = Modifier.weight(1f)) {
-                        when (selectedTabIndex) {
-                            0 -> ChatsTab(
-                                chats = chatContacts,
-                                onlineContacts = onlineContacts,
-                                onChatClick = { contact -> viewModel.selectContact(contact) }
-                            )
-                            1 -> ContactsTab(
+                ) { paddingValues ->
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(paddingValues)
+                    ) {
+                        if (showContactsSheet) {
+                            ContactsTab(
                                 contacts = allContacts,
                                 searchQuery = searchQuery,
                                 onSearchQueryChange = { q -> viewModel.setSearchQuery(q) },
-                                onContactClick = { contact -> viewModel.selectContact(contact) },
+                                onContactClick = { contact ->
+                                    showContactsSheet = false
+                                    viewModel.selectContact(contact)
+                                },
                                 onInviteContact = { contact -> viewModel.inviteContact(contact) }
                             )
-                            2 -> StoryListScreen(
-                                userProfile = userProfile,
-                                myPhoneNumber = myPhoneNumber,
-                                storiesGrouped = storiesGrouped,
-                                onOpenCreateStory = { showStoryCreateScreen = true },
-                                onViewStory = { authorPhone -> viewingStoryAuthorPhone = authorPhone }
-                            )
-                            3 -> MeshNodesTab(
-                                engineState = engineState,
-                                meshNodes = meshNodes,
-                                onScanPeers = { viewModel.startP2pDiscovery() },
-                                onConnectDevice = { device -> viewModel.connectToP2pDevice(device) },
-                                onStartHotspot = { viewModel.startHotspot() },
-                                onStopHotspot = { viewModel.stopHotspot() }
-                            )
-                            4 -> CallsTab(
-                                calls = calls,
-                                onStartCall = { contact, isVideo ->
-                                    if (isVideo) {
-                                        viewModel.startVideoCall(contact)
-                                    } else {
-                                        viewModel.startAudioCall(contact)
+                        } else {
+                            when (selectedTabIndex) {
+                                0 -> ChatsTab(
+                                    chats = chatContacts,
+                                    onlineContacts = onlineContacts,
+                                    onChatClick = { contact -> viewModel.selectContact(contact) },
+                                    filterChip = selectedFilterChip,
+                                    searchQuery = searchQueryText,
+                                    onOpenContacts = { showContactsSheet = true }
+                                )
+                                1 -> StoryListScreen(
+                                    userProfile = userProfile,
+                                    myPhoneNumber = myPhoneNumber,
+                                    storiesGrouped = storiesGrouped,
+                                    onOpenCreateStory = { showStoryCreateScreen = true },
+                                    onViewStory = { authorPhone -> viewingStoryAuthorPhone = authorPhone }
+                                )
+                                2 -> MeshNodesTab(
+                                    engineState = engineState,
+                                    meshNodes = meshNodes,
+                                    onScanPeers = { viewModel.startP2pDiscovery() },
+                                    onConnectDevice = { device -> viewModel.connectToP2pDevice(device) },
+                                    onDisconnectDevice = { viewModel.disconnectP2pDevice() },
+                                    onStartHotspot = { viewModel.startHotspot() },
+                                    onStopHotspot = { viewModel.stopHotspot() }
+                                )
+                                3 -> CallsTab(
+                                    calls = calls,
+                                    onStartCall = { contact, isVideo ->
+                                        if (isVideo) {
+                                            viewModel.startVideoCall(contact)
+                                        } else {
+                                            viewModel.startAudioCall(contact)
+                                        }
                                     }
-                                }
-                            )
+                                )
+                            }
                         }
                     }
                 }
