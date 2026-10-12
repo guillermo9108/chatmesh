@@ -38,4 +38,7 @@ interface MessageDao {
 
     @Query("SELECT * FROM messages WHERE recipientGroupId = :groupId ORDER BY timestamp ASC")
     fun getGroupConversationFlow(groupId: String): Flow<List<MessageEntity>>
+
+    @Query("SELECT * FROM messages WHERE recipientGroupId = :groupId ORDER BY timestamp ASC")
+    suspend fun getGroupConversationList(groupId: String): List<MessageEntity>
 }

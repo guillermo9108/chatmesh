@@ -271,7 +271,13 @@ class ChatMeshViewModel(application: Application) : AndroidViewModel(application
         val existing = repository.getUserProfile()
 
         if (existing == null) {
-            val nickname = nicknameOverride?.takeIf { it.isNotBlank() } ?: "Usuario"
+            // Elegir nickname: preferir el override, luego el guardado, luego generar uno nuevo
+            val nickname = nicknameOverride?.takeIf { it.isNotBlank() && it != "Usuario" }
+                ?: SimDetectionUtil.getSavedNickname(getApplication())
+                ?: SimDetectionUtil.generateRandomNickname(getApplication()).also {
+                    SimDetectionUtil.saveNickname(getApplication(), it)
+                }
+
             val newProfile = UserProfile(
                 phoneNumber = phoneNumber,
                 nickname = nickname,
@@ -281,7 +287,9 @@ class ChatMeshViewModel(application: Application) : AndroidViewModel(application
             repository.saveUserProfile(newProfile)
             meshEngine.initialize(newProfile.phoneNumber, newProfile.nickname, newProfile.avatarUri)
         } else if (existing.phoneNumber != phoneNumber) {
-            val nickname = nicknameOverride?.takeIf { it.isNotBlank() } ?: existing.nickname
+            val nickname = nicknameOverride?.takeIf { it.isNotBlank() && it != "Usuario" }
+                ?: existing.nickname.takeIf { it.isNotBlank() && it != "Usuario" }
+                ?: SimDetectionUtil.generateRandomNickname(getApplication())
             val updated = existing.copy(
                 phoneNumber = phoneNumber,
                 nickname = nickname,
@@ -290,7 +298,18 @@ class ChatMeshViewModel(application: Application) : AndroidViewModel(application
             repository.saveUserProfile(updated)
             meshEngine.initialize(updated.phoneNumber, updated.nickname, updated.avatarUri)
         } else {
-            meshEngine.initialize(existing.phoneNumber, existing.nickname, existing.avatarUri)
+            // Ya existe y el número es el mismo. Si el nickname es "Usuario" o vacío, regenerarlo
+            if (existing.nickname.isBlank() || existing.nickname == "Usuario") {
+                val newNick = SimDetectionUtil.generateRandomNickname(getApplication())
+                SimDetectionUtil.saveNickname(getApplication(), newNick)
+                val updated = existing.copy(nickname = newNick)
+                repository.saveUserProfile(updated)
+                meshEngine.initialize(updated.phoneNumber, updated.nickname, updated.avatarUri)
+            } else {
+                // Guardar el nickname actual en prefs por si acaso
+                SimDetectionUtil.saveNickname(getApplication(), existing.nickname)
+                meshEngine.initialize(existing.phoneNumber, existing.nickname, existing.avatarUri)
+            }
         }
 
         reloadSimDetails()
@@ -428,7 +447,7 @@ class ChatMeshViewModel(application: Application) : AndroidViewModel(application
 
     fun sendGroupImageMessage(uri: String, caption: String, base64: String) {
         val group = _selectedGroup.value ?: return
-        meshEngine.sendGroupMessage(group.groupId, caption, "IMAGE", uri, base64)
+        meshEngine.sendGroupMessage(group.groupId, caption, "IMAGE", uri, base64, 0)
     }
 
     fun sendGroupAudioMessage(base64: String, duration: Int) {
@@ -438,7 +457,7 @@ class ChatMeshViewModel(application: Application) : AndroidViewModel(application
 
     fun sendGroupFileMessage(fileName: String, fileUri: String) {
         val group = _selectedGroup.value ?: return
-        meshEngine.sendGroupMessage(group.groupId, fileName, "FILE", fileUri, null)
+        meshEngine.sendGroupMessage(group.groupId, fileName, "FILE", fileUri, null, 0)
     }
 
     fun addGroupMember(groupId: String, phone: String, name: String) {
@@ -540,6 +559,7 @@ class ChatMeshViewModel(application: Application) : AndroidViewModel(application
                 )
             }
             repository.saveUserProfile(updated)
+            SimDetectionUtil.saveNickname(getApplication(), nickname)
             meshEngine.updateUserProfile(cleanPhone, nickname, avatarUri)
         }
     }

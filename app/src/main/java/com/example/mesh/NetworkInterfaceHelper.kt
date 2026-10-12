@@ -84,51 +84,67 @@ object NetworkInterfaceHelper {
     }
 
     /**
-     * Devuelve MeshNetworkInfo(MeshTransport.HOTSPOT, "192.168.43.1", "192.168.43.255", "192.168.43.1", null)
-     * si el dispositivo es el AP o tiene interfaz hotspot activa.
+     * Devuelve MeshNetworkInfo(MeshTransport.HOTSPOT, ...) SOLO si este
+     * dispositivo es el punto de acceso.
+     *
+     * Estrategia:
+     * 1. Si hay conexión WiFi activa vía ConnectivityManager, NO somos AP.
+     * 2. Solo considerar interfaces con nombres típicos de AP (ap, swlan, softap, tether).
+     * 3. NO usar el rango de IP como criterio (192.168.43.x puede ser un router normal).
      */
-    fun getHotspotInfo(): MeshNetworkInfo? {
-        return try {
+    fun getHotspotInfo(context: Context? = null): MeshNetworkInfo? {
+        try {
+            // 1. Si estamos conectados como cliente WiFi, no somos AP
+            if (context != null) {
+                val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+                val activeNetwork = cm?.activeNetwork
+                val caps = activeNetwork?.let { cm.getNetworkCapabilities(it) }
+                val isConnectedAsWifiClient = caps?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true
+                if (isConnectedAsWifiClient) {
+                    Log.d(TAG, "Conectado como cliente WiFi: no somos AP")
+                    return null
+                }
+            }
+
+            // 2. Buscar interfaces que sugieran AP
             val interfaces = NetworkInterface.getNetworkInterfaces() ?: return null
             for (intf in interfaces) {
                 if (!intf.isUp || intf.isLoopback) continue
                 val name = intf.name.lowercase()
-                if (name.startsWith("p2p") || name.startsWith("rmnet") || name.startsWith("dummy")) continue
+
+                val isApInterface = name.startsWith("ap") ||
+                                    name.startsWith("swlan") ||
+                                    name.startsWith("softap") ||
+                                    name.startsWith("tether") ||
+                                    name.startsWith("wlan1") ||
+                                    name.startsWith("wlan2")
+
+                if (!isApInterface) continue
 
                 for (addr in intf.inetAddresses) {
                     if (!addr.isLoopbackAddress && addr is Inet4Address) {
                         val ip = addr.hostAddress ?: continue
-                        val isAp = name.startsWith("ap") ||
-                                   name.startsWith("swlan") ||
-                                   name.startsWith("softap") ||
-                                   name.startsWith("tether") ||
-                                   (name.startsWith("wlan") && name != "wlan0") ||
-                                   ip.startsWith("192.168.43.")
-
-                        if (isAp) {
-                            val broadcast = calculateBroadcastAddress(ip, 24)
-                            Log.i(TAG, "Hotspot detectado en interfaz ${intf.name}: IP=$ip, Broadcast=$broadcast")
-                            return MeshNetworkInfo(
-                                transport = MeshTransport.HOTSPOT,
-                                localIp = ip,
-                                subnetBroadcast = broadcast,
-                                gateway = ip,
-                                ssid = "Punto de Acceso Móvil"
-                            )
-                        }
+                        val broadcast = calculateBroadcastAddress(ip, 24)
+                        Log.i(TAG, "Hotspot detectado en interfaz ${intf.name}: IP=$ip")
+                        return MeshNetworkInfo(
+                            transport = MeshTransport.HOTSPOT,
+                            localIp = ip,
+                            subnetBroadcast = broadcast,
+                            gateway = ip,
+                            ssid = "Punto de Acceso Móvil"
+                        )
                     }
                 }
             }
-            null
+            return null
         } catch (e: Exception) {
-            null
+            return null
         }
     }
 
     /**
-     * Usa ConnectivityManager y WifiManager para obtener IP y SSID actuales.
-     * Devuelve MeshNetworkInfo(MeshTransport.WIFI_LAN, ip, broadcast, gateway, ssid)
-     * si hay conexión WiFi activa y NO es WiFi Direct.
+     * Detecta si estamos conectados a una red WiFi LAN (router).
+     * Prioriza ConnectivityManager sobre NetworkInterface para evitar falsos positivos.
      */
     fun getWifiLanInfo(context: Context): MeshNetworkInfo? {
         return try {
@@ -136,6 +152,7 @@ object NetworkInterfaceHelper {
             val network = cm.activeNetwork ?: return null
             val capabilities = cm.getNetworkCapabilities(network) ?: return null
 
+            // Solo si es WiFi o Ethernet
             if (!capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) &&
                 !capabilities.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)
             ) {
@@ -144,9 +161,9 @@ object NetworkInterfaceHelper {
 
             val linkProperties = cm.getLinkProperties(network)
             val interfaceName = linkProperties?.interfaceName.orEmpty()
-            if (interfaceName.lowercase().startsWith("p2p")) {
-                return null
-            }
+
+            // Si la interfaz es P2P, no es LAN
+            if (interfaceName.lowercase().startsWith("p2p")) return null
 
             var localIp: String? = null
             var prefixLength = 24
@@ -167,10 +184,6 @@ object NetworkInterfaceHelper {
                 }
             }
 
-            if (localIp.isNullOrBlank()) {
-                localIp = getLocalIpForInterface("wlan") ?: getLocalIpForInterface("eth")
-            }
-
             if (localIp.isNullOrBlank()) return null
 
             val wm = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
@@ -180,7 +193,7 @@ object NetworkInterfaceHelper {
 
             val broadcast = calculateBroadcastAddress(localIp!!, prefixLength)
 
-            Log.i(TAG, "WiFi LAN detectado: SSID=$ssid, IP=$localIp, Broadcast=$broadcast")
+            Log.i(TAG, "WiFi LAN detectado: SSID=$ssid, IP=$localIp, Gateway=$gateway")
             MeshNetworkInfo(
                 transport = MeshTransport.WIFI_LAN,
                 localIp = localIp!!,
@@ -195,12 +208,12 @@ object NetworkInterfaceHelper {
     }
 
     /**
-     * Prioridad: HOTSPOT (si está activo) > WIFI_LAN > WIFI_DIRECT > HOTSPOT nativo > NONE
-     * Detecta el modo de transporte idóneo dando preferencia a redes LAN/Router y Hotspot
+     * Prioridad: HOTSPOT (si está activo manualmente) > WIFI_LAN > HOTSPOT local > WIFI_DIRECT > NONE
      */
     fun detectActiveTransport(context: Context, isHotspotActive: Boolean = false): MeshNetworkInfo? {
+        // 1. Si el usuario activó el Hotspot manualmente, ese es el transporte
         if (isHotspotActive) {
-            val hotspot = getHotspotInfo()
+            val hotspot = getHotspotInfo(context)
             if (hotspot != null) return hotspot
             return MeshNetworkInfo(
                 transport = MeshTransport.HOTSPOT,
@@ -211,15 +224,16 @@ object NetworkInterfaceHelper {
             )
         }
 
-        // Si hay punto de acceso detectado en interfaces
-        val hotspot = getHotspotInfo()
-        if (hotspot != null) return hotspot
-
-        // Si hay conexión WiFi LAN activa (router de casa/oficina o conectado a hotspot de otro móvil)
+        // 2. PRIORIDAD: Si estamos conectados como cliente a una red WiFi, es WiFi LAN
+        //    (aunque no tenga internet, sigue siendo LAN)
         val lan = getWifiLanInfo(context)
         if (lan != null) return lan
 
-        // WiFi Direct P2P
+        // 3. Hotspot local (solo si no hay WiFi cliente activa)
+        val hotspot = getHotspotInfo(context)
+        if (hotspot != null) return hotspot
+
+        // 4. WiFi Direct P2P
         val p2p = getWifiDirectInfo()
         if (p2p != null) return p2p
 

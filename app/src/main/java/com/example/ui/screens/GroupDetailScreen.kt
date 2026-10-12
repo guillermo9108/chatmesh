@@ -43,6 +43,7 @@ import com.example.util.VoiceMessageHelper
 import com.example.ui.components.ChatBubble
 import com.example.ui.components.GroupAvatar
 import com.example.ui.theme.*
+import com.example.mesh.SimDetectionUtil as SimUtil
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.io.ByteArrayOutputStream
@@ -52,17 +53,19 @@ import java.io.InputStream
 @Composable
 fun GroupDetailScreen(
     group: GroupEntity,
-    members: List<GroupMemberEntity>,
     messages: List<MessageEntity>,
-    onBack: () -> Unit,
-    onGroupInfoClick: () -> Unit,
-    onSendTextMessage: (String) -> Unit,
-    onSendImageMessage: (uri: String, caption: String, base64: String) -> Unit,
-    onSendAudioMessage: (base64: String, duration: Int) -> Unit,
-    onSendFileMessage: (fileName: String, fileUri: String) -> Unit,
+    members: List<GroupMemberEntity>,
+    myPhone: String,
+    onBackClick: () -> Unit,
+    onOpenInfo: () -> Unit,
+    onSendMessage: (String) -> Unit,
+    onSendImage: (String, String, String) -> Unit,
+    onSendAudio: (String, Int) -> Unit,
+    onSendFile: (String) -> Unit,
+    onTypingChange: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    BackHandler { onBack() }
+    BackHandler { onBackClick() }
 
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -84,7 +87,7 @@ fun GroupDetailScreen(
             scope.launch {
                 val base64 = encodeImageUriToBase64(context, it)
                 if (base64.isNotBlank()) {
-                    onSendImageMessage(it.toString(), "", base64)
+                    onSendImage(it.toString(), "", base64)
                 }
             }
         }
@@ -96,7 +99,7 @@ fun GroupDetailScreen(
     ) { uri: Uri? ->
         uri?.let {
             val fileName = queryFileName(context, it) ?: "archivo"
-            onSendFileMessage(fileName, it.toString())
+            onSendFile(fileName)
         }
     }
 
@@ -127,7 +130,7 @@ fun GroupDetailScreen(
                             verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clickable { onGroupInfoClick() }
+                                .clickable { onOpenInfo() }
                         ) {
                             GroupAvatar(
                                 avatarUri = group.avatarUri,
@@ -153,7 +156,7 @@ fun GroupDetailScreen(
                         }
                     },
                     navigationIcon = {
-                        IconButton(onClick = onBack) {
+                        IconButton(onClick = onBackClick) {
                             Icon(
                                 imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                                 contentDescription = "Volver"
@@ -161,7 +164,7 @@ fun GroupDetailScreen(
                         }
                     },
                     actions = {
-                        IconButton(onClick = onGroupInfoClick) {
+                        IconButton(onClick = onOpenInfo) {
                             Icon(Icons.Default.Info, contentDescription = "Información del grupo")
                         }
                     },
@@ -225,7 +228,16 @@ fun GroupDetailScreen(
                     }
 
                     items(messages) { msg ->
-                        ChatBubble(message = msg)
+                        val senderName = if (msg.isOutgoing) {
+                            null
+                        } else {
+                            members.firstOrNull { SimUtil.isMatchingPhone(it.phoneNumber, msg.senderPhone) }?.displayName
+                                ?: msg.senderPhone
+                        }
+                        GroupChatBubble(
+                            message = msg,
+                            senderName = senderName
+                        )
                     }
                 }
 
@@ -288,7 +300,10 @@ fun GroupDetailScreen(
                                     }
                                     OutlinedTextField(
                                         value = inputText,
-                                        onValueChange = { inputText = it },
+                                        onValueChange = {
+                                            inputText = it
+                                            onTypingChange(it)
+                                        },
                                         placeholder = {
                                             Text("Mensaje para el grupo", color = Color.Gray)
                                         },
@@ -327,14 +342,14 @@ fun GroupDetailScreen(
                         FloatingActionButton(
                             onClick = {
                                 if (inputText.isNotBlank()) {
-                                    onSendTextMessage(inputText.trim())
+                                    onSendMessage(inputText.trim())
                                     inputText = ""
                                 } else if (isRecording) {
                                     val dur = recordingSeconds
                                     val (_, base64) = VoiceMessageHelper.stopRecording()
                                     isRecording = false
                                     if (base64 != null) {
-                                        onSendAudioMessage(base64, dur.coerceAtLeast(1))
+                                        onSendAudio(base64, dur.coerceAtLeast(1))
                                     }
                                 } else {
                                     val started = VoiceMessageHelper.startRecording(context)
@@ -458,3 +473,43 @@ private fun queryFileName(context: Context, uri: Uri): String? {
     }
     return name
 }
+
+@Composable
+private fun GroupChatBubble(
+    message: MessageEntity,
+    senderName: String?
+) {
+    val dims = LocalAppDimensions.current
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = dims.screenPadding / 2, vertical = 2.dp)
+    ) {
+        if (!message.isOutgoing && senderName != null) {
+            Text(
+                text = senderName,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = colorForName(senderName),
+                modifier = Modifier.padding(start = 12.dp, bottom = 2.dp)
+            )
+        }
+        ChatBubble(message = message)
+    }
+}
+
+private fun colorForName(name: String): Color {
+    val palette = listOf(
+        Color(0xFF1E88E5),
+        Color(0xFFD81B60),
+        Color(0xFF6D4C41),
+        Color(0xFF00897B),
+        Color(0xFF7B1FA2),
+        Color(0xFFC62828),
+        Color(0xFFEF6C00),
+        Color(0xFF2E7D32)
+    )
+    val idx = (name.hashCode() and 0x7FFFFFFF) % palette.size
+    return palette[idx]
+}
+

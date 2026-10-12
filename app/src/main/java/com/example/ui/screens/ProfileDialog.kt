@@ -46,7 +46,13 @@ fun ProfileDialog(
 ) {
     val dims = LocalAppDimensions.current
     val context = LocalContext.current
-    var nickname by remember { mutableStateOf(userProfile?.nickname ?: "Usuario") }
+    var nickname by remember {
+        mutableStateOf(
+            userProfile?.nickname?.takeIf { it.isNotBlank() && it != "Usuario" }
+                ?: com.example.mesh.SimDetectionUtil.getSavedNickname(context)
+                ?: com.example.mesh.SimDetectionUtil.generateRandomNickname(context)
+        )
+    }
     var phone by remember { mutableStateOf(userProfile?.phoneNumber ?: "+53...") }
     var selectedAvatarUri by remember { mutableStateOf(userProfile?.avatarUri) }
     var isError by remember { mutableStateOf(false) }

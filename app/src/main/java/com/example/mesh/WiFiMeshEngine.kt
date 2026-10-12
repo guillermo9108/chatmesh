@@ -1425,11 +1425,8 @@ class WiFiMeshEngine(
         audioDuration: Int = 0
     ) {
         scope.launch {
-            val messageUuid = UUID.randomUUID().toString()
             val myPhone = _engineState.value.myPhoneNumber
-            val myName = _engineState.value.myNickname.ifBlank { "Usuario" }
-            Log.i(TAG, "GROUP_MESSAGE enviando para grupo=$groupId, uuid=$messageUuid, tipo=$mediaType")
-
+            val messageUuid = UUID.randomUUID().toString()
             val entity = MessageEntity(
                 messageUuid = messageUuid,
                 senderPhone = myPhone,
@@ -1447,25 +1444,27 @@ class WiFiMeshEngine(
             repository.saveMessage(entity)
 
             val members = repository.getGroupMembersList(groupId)
-                .filter { it.phoneNumber != myPhone }
-
+            val recipients = members.filter { it.phoneNumber != myPhone }
             val rawData = mediaData.orEmpty()
+
             if (rawData.length > MEDIA_CHUNK_SIZE) {
                 val totalChunks = (rawData.length + MEDIA_CHUNK_SIZE - 1) / MEDIA_CHUNK_SIZE
-                for (i in 0 until totalChunks) {
-                    val start = i * MEDIA_CHUNK_SIZE
-                    val end = minOf(start + MEDIA_CHUNK_SIZE, rawData.length)
-                    val chunkData = rawData.substring(start, end)
-                    members.forEach { m ->
+                Log.i(TAG, "Enviando grupo $mediaType: $totalChunks chunks, ${rawData.length} chars")
+
+                for (member in recipients) {
+                    for (i in 0 until totalChunks) {
+                        val start = i * MEDIA_CHUNK_SIZE
+                        val end = minOf(start + MEDIA_CHUNK_SIZE, rawData.length)
+                        val chunkData = rawData.substring(start, end)
                         val packet = MeshPacket(
                             packetType = "GROUP_MESSAGE_CHUNK",
                             packetUuid = messageUuid,
                             sourceNodeId = _engineState.value.myNodeId,
                             sourcePhone = myPhone,
-                            sourceName = myName,
+                            sourceName = _engineState.value.myNickname.ifBlank { "Usuario" },
                             sourceSsid = _engineState.value.ssid,
                             sourceAvatar = _engineState.value.myAvatarUri,
-                            destinationPhone = m.phoneNumber,
+                            destinationPhone = member.phoneNumber,
                             groupId = groupId,
                             content = content,
                             mediaType = mediaType,
@@ -1475,40 +1474,35 @@ class WiFiMeshEngine(
                             totalChunks = totalChunks
                         )
                         transmitMeshPacketSync(packet)
+                        delay(CHUNK_DELAY_MS)
                     }
-                    delay(CHUNK_DELAY_MS)
-                }
-                members.forEach { m ->
-                    val finalPacket = MeshPacket(
+                    val endPacket = MeshPacket(
                         packetType = "GROUP_MESSAGE_END",
                         packetUuid = messageUuid,
                         sourceNodeId = _engineState.value.myNodeId,
                         sourcePhone = myPhone,
-                        sourceName = myName,
+                        sourceName = _engineState.value.myNickname.ifBlank { "Usuario" },
                         sourceSsid = _engineState.value.ssid,
                         sourceAvatar = _engineState.value.myAvatarUri,
-                        destinationPhone = m.phoneNumber,
+                        destinationPhone = member.phoneNumber,
                         groupId = groupId,
-                        content = content,
                         mediaType = mediaType,
-                        mediaData = null,
-                        audioDuration = audioDuration,
                         chunkIndex = totalChunks,
                         totalChunks = totalChunks
                     )
-                    transmitMeshPacketSync(finalPacket)
+                    transmitMeshPacketSync(endPacket)
                 }
             } else {
-                members.forEach { m ->
+                for (member in recipients) {
                     val packet = MeshPacket(
                         packetType = "GROUP_MESSAGE",
                         packetUuid = messageUuid,
                         sourceNodeId = _engineState.value.myNodeId,
                         sourcePhone = myPhone,
-                        sourceName = myName,
+                        sourceName = _engineState.value.myNickname.ifBlank { "Usuario" },
                         sourceSsid = _engineState.value.ssid,
                         sourceAvatar = _engineState.value.myAvatarUri,
-                        destinationPhone = m.phoneNumber,
+                        destinationPhone = member.phoneNumber,
                         groupId = groupId,
                         content = content,
                         mediaType = mediaType,
@@ -2135,58 +2129,106 @@ class WiFiMeshEngine(
                     }
                 }
                 "GROUP_MESSAGE" -> {
-                    if (isForMe && !packet.groupId.isNullOrBlank()) {
-                        Log.i(TAG, "GROUP_MESSAGE recibido grupo=${packet.groupId} de ${packet.sourcePhone}")
-                        sendAck(packet.packetUuid, packet.sourcePhone)
-                        persistIncomingMessage(packet, myPhone)
-                        val g = repository.getGroup(packet.groupId)
-                        val groupTitle = g?.name ?: "Grupo"
-                        val senderName = packet.sourceName.ifBlank { packet.sourcePhone }
-                        notificationHelper.showIncomingMessageNotification(
-                            packet.sourcePhone,
-                            groupTitle,
-                            "$senderName: ${packet.content.ifEmpty { "Nuevo mensaje" }}"
-                        )
-                    }
-                }
-                "GROUP_MESSAGE_CHUNK" -> {
-                    if (isForMe && !packet.groupId.isNullOrBlank()) {
-                        val chunks = receivedChunks.computeIfAbsent(packet.packetUuid) { ConcurrentHashMap() }
-                        packet.mediaData?.let { chunks[packet.chunkIndex] = it }
-                        if (chunks.size == packet.totalChunks) {
-                            val sorted = (0 until packet.totalChunks).joinToString("") { chunks[it].orEmpty() }
-                            Log.i(TAG, "GROUP_MESSAGE completo: ${packet.mediaType}, ${sorted.length} chars")
-                            persistIncomingMessage(packet.copy(mediaData = sorted), myPhone)
+                    if (isForMe) {
+                        val gid = packet.groupId
+                        if (gid != null) {
+                            // Si no tenemos el grupo, crear un mínimo
+                            if (repository.getGroup(gid) == null) {
+                                repository.saveGroup(
+                                    GroupEntity(
+                                        groupId = gid,
+                                        name = packet.groupName ?: "Grupo",
+                                        createdByPhone = packet.sourcePhone,
+                                        createdAt = packet.timestamp
+                                    )
+                                )
+                            }
                             sendAck(packet.packetUuid, packet.sourcePhone)
-                            receivedChunks.remove(packet.packetUuid)
-                            val g = repository.getGroup(packet.groupId)
-                            val groupTitle = g?.name ?: "Grupo"
-                            val senderName = packet.sourceName.ifBlank { packet.sourcePhone }
+                            persistIncomingGroupMessage(packet, gid)
                             notificationHelper.showIncomingMessageNotification(
                                 packet.sourcePhone,
-                                groupTitle,
-                                "$senderName: ${when (packet.mediaType) {
-                                    "IMAGE" -> "📷 Foto"
-                                    "AUDIO" -> "🎤 Mensaje de voz"
-                                    "FILE" -> "📎 Archivo"
-                                    else -> packet.content.ifEmpty { "Nuevo mensaje" }
-                                }}"
+                                packet.sourceName.ifBlank { packet.sourcePhone },
+                                packet.content.ifEmpty { "Nuevo mensaje en el grupo" }
                             )
                         }
                     }
                 }
-                "GROUP_MESSAGE_END" -> {
-                    if (isForMe && !packet.groupId.isNullOrBlank()) {
-                        val chunks = receivedChunks[packet.packetUuid]
-                        if (chunks != null && chunks.size < packet.totalChunks) {
-                            Log.w(TAG, "GROUP_MESSAGE ${packet.packetUuid.take(8)} incompleto: ${chunks.size}/${packet.totalChunks}")
-                        } else {
-                            Log.i(TAG, "GROUP_MESSAGE ${packet.packetUuid.take(8)} confirmado completo")
+                "GROUP_MESSAGE_CHUNK" -> {
+                    if (isForMe) {
+                        val gid = packet.groupId
+                        if (gid != null) {
+                            val chunks = receivedChunks.computeIfAbsent(packet.packetUuid) { ConcurrentHashMap() }
+                            packet.mediaData?.let { chunks[packet.chunkIndex] = it }
+                            Log.d(TAG, "Chunk grupo ${packet.chunkIndex + 1}/${packet.totalChunks} (${chunks.size} recibidos)")
+                            if (chunks.size == packet.totalChunks) {
+                                val sorted = (0 until packet.totalChunks).joinToString("") { chunks[it].orEmpty() }
+                                persistIncomingGroupMessage(packet.copy(mediaData = sorted), gid)
+                                sendAck(packet.packetUuid, packet.sourcePhone)
+                                receivedChunks.remove(packet.packetUuid)
+                                notificationHelper.showIncomingMessageNotification(
+                                    packet.sourcePhone,
+                                    packet.sourceName.ifBlank { packet.sourcePhone },
+                                    when (packet.mediaType) {
+                                        "IMAGE" -> "📷 Foto en el grupo"
+                                        "AUDIO" -> "🎤 Mensaje de voz en el grupo"
+                                        "FILE" -> "📎 Archivo en el grupo"
+                                        else -> "Nuevo mensaje en el grupo"
+                                    }
+                                )
+                            }
                         }
+                    }
+                }
+                "GROUP_MESSAGE_END" -> {
+                    // Cierre de chunks de grupo. Si faltan chunks, log de advertencia.
+                    val chunks = receivedChunks[packet.packetUuid]
+                    if (chunks != null && chunks.size < packet.totalChunks) {
+                        Log.w(TAG, "Grupo incompleto ${packet.packetUuid.take(8)}: ${chunks.size}/${packet.totalChunks}")
                     }
                 }
             }
         }
+    }
+
+    private suspend fun persistIncomingGroupMessage(packet: MeshPacket, groupId: String) {
+        // Asegurar que el grupo existe
+        if (repository.getGroup(groupId) == null) {
+            repository.saveGroup(
+                GroupEntity(
+                    groupId = groupId,
+                    name = packet.groupName ?: "Grupo",
+                    createdByPhone = packet.sourcePhone,
+                    createdAt = packet.timestamp
+                )
+            )
+        }
+        // Asegurar que el emisor está como miembro
+        val members = repository.getGroupMembersList(groupId)
+        if (members.none { SimDetectionUtil.isMatchingPhone(it.phoneNumber, packet.sourcePhone) }) {
+            repository.saveGroupMember(
+                GroupMemberEntity(
+                    groupId = groupId,
+                    phoneNumber = packet.sourcePhone,
+                    displayName = packet.sourceName.ifBlank { packet.sourcePhone },
+                    isAdmin = false
+                )
+            )
+        }
+
+        val entity = MessageEntity(
+            messageUuid = packet.packetUuid,
+            senderPhone = packet.sourcePhone,
+            recipientPhone = null,
+            recipientGroupId = groupId,
+            content = packet.content,
+            mediaType = packet.mediaType,
+            mediaBase64 = packet.mediaData,
+            timestamp = packet.timestamp,
+            status = "DELIVERED",
+            isOutgoing = false,
+            audioDurationSeconds = packet.audioDuration
+        )
+        repository.saveMessage(entity)
     }
 
     private suspend fun persistIncomingMessage(packet: MeshPacket, myPhone: String) {

@@ -276,20 +276,16 @@ fun MainAppScreen(
             selectedGroup != null -> {
                 GroupDetailScreen(
                     group = selectedGroup!!,
-                    members = activeGroupMembers,
                     messages = activeGroupMessages,
-                    onBack = { viewModel.selectGroup(null) },
-                    onGroupInfoClick = { selectedGroupForInfo = selectedGroup },
-                    onSendTextMessage = { text -> viewModel.sendGroupTextMessage(text) },
-                    onSendImageMessage = { uri, caption, base64 ->
-                        viewModel.sendGroupImageMessage(uri, caption, base64)
-                    },
-                    onSendAudioMessage = { base64, durationSec ->
-                        viewModel.sendGroupAudioMessage(base64, durationSec)
-                    },
-                    onSendFileMessage = { fileName, fileUri ->
-                        viewModel.sendGroupFileMessage(fileName, fileUri)
-                    }
+                    members = activeGroupMembers,
+                    myPhone = userProfile?.phoneNumber.orEmpty(),
+                    onBackClick = { viewModel.selectGroup(null) },
+                    onOpenInfo = { selectedGroupForInfo = selectedGroup },
+                    onSendMessage = { viewModel.sendGroupTextMessage(it) },
+                    onSendImage = { uri, caption, base64 -> viewModel.sendGroupImageMessage(uri, caption, base64) },
+                    onSendAudio = { b64, dur -> viewModel.sendGroupAudioMessage(b64, dur) },
+                    onSendFile = { name -> viewModel.sendGroupFileMessage(name, name) },
+                    onTypingChange = { /* opcional: enviar a todos los miembros */ }
                 )
             }
 

@@ -290,4 +290,47 @@ object SimDetectionUtil {
     fun detectSimPhoneNumber(context: Context): String {
         return detectRealPhoneNumber(context) ?: ""
     }
+
+    // ============================================================
+    //  NICKNAMES ALEATORIOS DETERMINÍSTICOS
+    // ============================================================
+
+    private val adjectives = listOf(
+        "Rápido", "Valiente", "Silencioso", "Audaz", "Astuto", "Fuerte",
+        "Brillante", "Veloz", "Sereno", "Salvaje", "Feroz", "Ágil",
+        "Curioso", "Ingenioso", "Tenaz", "Noble", "Intrépido", "Vigilante"
+    )
+
+    private val animals = listOf(
+        "Águila", "Tigre", "Lobo", "Zorro", "Halcón", "León",
+        "Pantera", "Jaguar", "Cóndor", "Tiburón", "Búho", "Cuervo",
+        "Ballena", "Delfín", "Serpiente", "Oso", "Lince", "Puma"
+    )
+
+    /**
+     * Genera un nickname aleatorio determinístico a partir del deviceFingerprint.
+     * El mismo dispositivo siempre genera el mismo nickname entre reinstalaciones.
+     */
+    fun generateRandomNickname(context: Context): String {
+        val fingerprint = DeviceIdentity.getDeviceFingerprint(context)
+        val hash = fingerprint.hashCode().let { if (it < 0) -it else it }
+        val adj = adjectives[hash % adjectives.size]
+        val animal = animals[(hash / adjectives.size) % animals.size]
+        val number = (hash % 100).toString().padStart(2, '0')
+        return "$adj$animal$number"
+    }
+
+    /** Guarda el nickname generado en prefs. */
+    fun saveNickname(context: Context, nickname: String) {
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putString("user_nickname", nickname)
+            .apply()
+    }
+
+    /** Devuelve el nickname guardado, o null si no hay. */
+    fun getSavedNickname(context: Context): String? {
+        return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .getString("user_nickname", null)
+    }
 }
