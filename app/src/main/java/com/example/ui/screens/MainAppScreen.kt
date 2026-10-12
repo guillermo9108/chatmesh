@@ -26,6 +26,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.data.entity.GroupEntity
 import com.example.mesh.MeshTransport
 import com.example.ui.components.AddContactDialog
 import com.example.ui.components.GitHubInfoDialog
@@ -53,6 +54,10 @@ fun MainAppScreen(
     val realSimDetails by viewModel.realSimDetails.collectAsStateWithLifecycle()
     val selectedContact by viewModel.selectedContact.collectAsStateWithLifecycle()
     val activeMessages by viewModel.activeMessages.collectAsStateWithLifecycle()
+    val allGroups by viewModel.allGroups.collectAsStateWithLifecycle()
+    val selectedGroup by viewModel.selectedGroup.collectAsStateWithLifecycle()
+    val activeGroupMembers by viewModel.activeGroupMembers.collectAsStateWithLifecycle()
+    val activeGroupMessages by viewModel.activeGroupMessages.collectAsStateWithLifecycle()
     val searchQuery by viewModel.searchQuery.collectAsStateWithLifecycle()
     val localVideoBitmap by viewModel.localVideoBitmap.collectAsStateWithLifecycle()
     val remoteVideoBitmap by viewModel.remoteVideoBitmap.collectAsStateWithLifecycle()
@@ -62,10 +67,16 @@ fun MainAppScreen(
     var showStoryCreateScreen by remember { mutableStateOf(false) }
     var viewingStoryAuthorPhone by remember { mutableStateOf<String?>(null) }
 
-    // Estado de registro manual
+    // Estados de grupos
+    var showCreateGroupScreen by remember { mutableStateOf(false) }
+    var selectedGroupForInfo by remember { mutableStateOf<GroupEntity?>(null) }
+
+    // Estado de registro manual & fallback
     val registrationRequired by viewModel.registrationRequired.collectAsStateWithLifecycle()
     val registrationError by viewModel.registrationError.collectAsStateWithLifecycle()
     val detectedPhoneForPrefill by viewModel.detectedPhoneForPrefill.collectAsStateWithLifecycle()
+    val usingFallbackNumber by viewModel.usingFallbackNumber.collectAsStateWithLifecycle()
+    val prefer5Ghz by viewModel.prefer5Ghz.collectAsStateWithLifecycle()
 
     val context = LocalContext.current
     val videoQuality by viewModel.videoQuality.collectAsStateWithLifecycle()
@@ -105,17 +116,26 @@ fun MainAppScreen(
     BackHandler(enabled = viewingStoryAuthorPhone == null && showStoryCreateScreen) {
         showStoryCreateScreen = false
     }
-    BackHandler(enabled = viewingStoryAuthorPhone == null && !showStoryCreateScreen && selectedContact != null) {
+    BackHandler(enabled = viewingStoryAuthorPhone == null && !showStoryCreateScreen && showCreateGroupScreen) {
+        showCreateGroupScreen = false
+    }
+    BackHandler(enabled = viewingStoryAuthorPhone == null && !showStoryCreateScreen && !showCreateGroupScreen && selectedGroupForInfo != null) {
+        selectedGroupForInfo = null
+    }
+    BackHandler(enabled = viewingStoryAuthorPhone == null && !showStoryCreateScreen && !showCreateGroupScreen && selectedGroupForInfo == null && selectedGroup != null) {
+        viewModel.selectGroup(null)
+    }
+    BackHandler(enabled = viewingStoryAuthorPhone == null && !showStoryCreateScreen && !showCreateGroupScreen && selectedGroupForInfo == null && selectedGroup == null && selectedContact != null) {
         viewModel.selectContact(null)
     }
-    BackHandler(enabled = viewingStoryAuthorPhone == null && !showStoryCreateScreen && selectedContact == null && showContactsSheet) {
+    BackHandler(enabled = viewingStoryAuthorPhone == null && !showStoryCreateScreen && !showCreateGroupScreen && selectedGroupForInfo == null && selectedGroup == null && selectedContact == null && showContactsSheet) {
         showContactsSheet = false
     }
-    BackHandler(enabled = viewingStoryAuthorPhone == null && !showStoryCreateScreen && selectedContact == null && !showContactsSheet && isSearchActive) {
+    BackHandler(enabled = viewingStoryAuthorPhone == null && !showStoryCreateScreen && !showCreateGroupScreen && selectedGroupForInfo == null && selectedGroup == null && selectedContact == null && !showContactsSheet && isSearchActive) {
         isSearchActive = false
         searchQueryText = ""
     }
-    BackHandler(enabled = viewingStoryAuthorPhone == null && !showStoryCreateScreen && selectedContact == null && !showContactsSheet && !isSearchActive && selectedTabIndex != 0) {
+    BackHandler(enabled = viewingStoryAuthorPhone == null && !showStoryCreateScreen && !showCreateGroupScreen && selectedGroupForInfo == null && selectedGroup == null && selectedContact == null && !showContactsSheet && !isSearchActive && selectedTabIndex != 0) {
         selectedTabIndex = 0
     }
 
@@ -208,7 +228,7 @@ fun MainAppScreen(
                 )
             }
 
-            // PRIORIDAD 3: Creación de historia
+            // PRIORIDAD 4: Creación de historia
             showStoryCreateScreen -> {
                 StoryCreateScreen(
                     onPublishText = { text, color ->
@@ -223,7 +243,57 @@ fun MainAppScreen(
                 )
             }
 
-            // PRIORIDAD 4: Chat abierto
+            // PRIORIDAD 5: Crear grupo
+            showCreateGroupScreen -> {
+                CreateGroupScreen(
+                    contacts = allContacts,
+                    onBack = { showCreateGroupScreen = false },
+                    onCreateGroup = { name, members ->
+                        viewModel.createGroup(name, members)
+                        showCreateGroupScreen = false
+                    }
+                )
+            }
+
+            // PRIORIDAD 6: Información de grupo
+            selectedGroupForInfo != null -> {
+                GroupInfoScreen(
+                    group = selectedGroupForInfo!!,
+                    members = activeGroupMembers,
+                    contacts = allContacts,
+                    myPhoneNumber = myPhoneNumber,
+                    onBack = { selectedGroupForInfo = null },
+                    onAddMember = { gid, ph, nm -> viewModel.addGroupMember(gid, ph, nm) },
+                    onRemoveMember = { gid, ph -> viewModel.removeGroupMember(gid, ph) },
+                    onLeaveGroup = { gid ->
+                        viewModel.leaveGroup(gid)
+                        selectedGroupForInfo = null
+                    }
+                )
+            }
+
+            // PRIORIDAD 7: Conversación grupal
+            selectedGroup != null -> {
+                GroupDetailScreen(
+                    group = selectedGroup!!,
+                    members = activeGroupMembers,
+                    messages = activeGroupMessages,
+                    onBack = { viewModel.selectGroup(null) },
+                    onGroupInfoClick = { selectedGroupForInfo = selectedGroup },
+                    onSendTextMessage = { text -> viewModel.sendGroupTextMessage(text) },
+                    onSendImageMessage = { uri, caption, base64 ->
+                        viewModel.sendGroupImageMessage(uri, caption, base64)
+                    },
+                    onSendAudioMessage = { base64, durationSec ->
+                        viewModel.sendGroupAudioMessage(base64, durationSec)
+                    },
+                    onSendFileMessage = { fileName, fileUri ->
+                        viewModel.sendGroupFileMessage(fileName, fileUri)
+                    }
+                )
+            }
+
+            // PRIORIDAD 8: Chat 1-a-1 abierto
             selectedContact != null -> {
                 ChatDetailScreen(
                     contact = selectedContact!!,
@@ -332,6 +402,7 @@ fun MainAppScreen(
                                 onSearchQueryChange = { searchQueryText = it },
                                 onSearchActiveChange = { isSearchActive = it },
                                 onCameraClick = { showStoryCreateScreen = true },
+                                onNewGroupClick = { showCreateGroupScreen = true },
                                 onProfileClick = { showProfileDialog = true },
                                 onSyncContactsClick = { viewModel.refreshContacts() },
                                 onSimConfigClick = { showSimConfigDialog = true },
@@ -356,7 +427,7 @@ fun MainAppScreen(
                                     .fillMaxWidth()
                                     .testTag("whatsapp_bottom_navigation")
                             ) {
-                                val unreadChats = chatContacts.sumOf { it.unreadCount }
+                                val unreadChats = chatContacts.sumOf { it.unreadCount } + allGroups.sumOf { it.unreadCount }
 
                                 // 1. Chats
                                 NavigationBarItem(
@@ -588,12 +659,43 @@ fun MainAppScreen(
                         .statusBarsPadding()
                         .navigationBarsPadding()
                 ) { paddingValues ->
-                    Box(
+                    Column(
                         modifier = Modifier
                             .fillMaxSize()
                             .padding(paddingValues)
                     ) {
-                        if (showContactsSheet) {
+                        if (usingFallbackNumber) {
+                            Surface(
+                                color = MaterialTheme.colorScheme.tertiaryContainer,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(Icons.Default.Info, contentDescription = null, modifier = Modifier.size(14.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = "Usando número temporal. Toca para configurar tu número real.",
+                                        fontSize = 11.sp,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    TextButton(
+                                        onClick = { showSimConfigDialog = true },
+                                        contentPadding = PaddingValues(horizontal = 6.dp)
+                                    ) {
+                                        Text("Configurar", fontSize = 11.sp)
+                                    }
+                                }
+                            }
+                        }
+
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .weight(1f)
+                        ) {
+                            if (showContactsSheet) {
                             ContactsTab(
                                 contacts = allContacts,
                                 searchQuery = searchQuery,
@@ -608,8 +710,10 @@ fun MainAppScreen(
                             when (selectedTabIndex) {
                                 0 -> ChatsTab(
                                     chats = chatContacts,
+                                    groups = allGroups,
                                     onlineContacts = onlineContacts,
                                     onChatClick = { contact -> viewModel.selectContact(contact) },
+                                    onGroupClick = { group -> viewModel.selectGroup(group) },
                                     filterChip = selectedFilterChip,
                                     searchQuery = searchQueryText,
                                     onOpenContacts = { showContactsSheet = true }
@@ -646,8 +750,9 @@ fun MainAppScreen(
                 }
             }
         }
+    }
 
-        // Dialogs (solo si no estamos en registro)
+    // Dialogs (solo si no estamos en registro)
         if (!registrationRequired) {
             if (showProfileDialog) {
                 ProfileDialog(
@@ -705,6 +810,8 @@ fun MainAppScreen(
                     blePeersPhones = blePeersPhones,
                     bleEnabled = bleEnabled,
                     isBleNegotiatingGo = isBleNegotiatingGo,
+                    prefer5Ghz = prefer5Ghz,
+                    onPrefer5GhzChange = { viewModel.setPrefer5Ghz(it) },
                     onDismiss = { showMeshSettingsDialog = false }
                 )
             }

@@ -63,7 +63,7 @@ class NotificationHelper(private val context: Context) {
         val title = if (senderName.isNotEmpty()) senderName else senderPhone
 
         val notification = NotificationCompat.Builder(context, CHANNEL_MESSAGES_ID)
-            .setSmallIcon(R.drawable.ic_app_logo)
+            .setSmallIcon(R.drawable.ic_stat_chat)
             .setContentTitle(title)
             .setContentText(messageText)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
@@ -118,7 +118,7 @@ class NotificationHelper(private val context: Context) {
         val title = if (callerName.isNotEmpty()) callerName else callerPhone
 
         val notification = NotificationCompat.Builder(context, CHANNEL_CALLS_ID)
-            .setSmallIcon(R.drawable.ic_app_logo)
+            .setSmallIcon(R.drawable.ic_stat_chat)
             .setContentTitle(if (isVideo) "📹 Videollamada entrante P2P" else "📞 Llamada entrante P2P")
             .setContentText("$title te está llamando por WiFi Direct")
             .setPriority(NotificationCompat.PRIORITY_MAX)
@@ -151,7 +151,7 @@ class NotificationHelper(private val context: Context) {
         )
 
         val notification = NotificationCompat.Builder(context, CHANNEL_MESSAGES_ID)
-            .setSmallIcon(R.drawable.ic_app_logo)
+            .setSmallIcon(R.drawable.ic_stat_chat)
             .setContentTitle("Solicitud de hotspot")
             .setContentText("$requesterName quiere conectarse a tu hotspot ChatMesh")
             .setPriority(NotificationCompat.PRIORITY_HIGH)

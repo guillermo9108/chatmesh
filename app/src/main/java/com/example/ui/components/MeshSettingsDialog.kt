@@ -51,6 +51,8 @@ fun MeshSettingsDialog(
     blePeersPhones: List<String> = emptyList(),
     bleEnabled: Boolean = false,
     isBleNegotiatingGo: Boolean = false,
+    prefer5Ghz: Boolean = false,
+    onPrefer5GhzChange: (Boolean) -> Unit = {},
     onDismiss: () -> Unit
 ) {
     val dims = LocalAppDimensions.current
@@ -283,6 +285,12 @@ fun MeshSettingsDialog(
                                 text = "Crea un punto de acceso sin saldo ni datos. Los demás se conectan como a cualquier WiFi.",
                                 fontSize = 11.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                text = com.example.mesh.HotspotManager.BAND_INFO_MESSAGE,
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(top = 4.dp)
                             )
                             Spacer(modifier = Modifier.height(8.dp))
                             Button(
@@ -700,10 +708,70 @@ fun MeshSettingsDialog(
                 Spacer(modifier = Modifier.height(14.dp))
 
                 // ==========================================
-                // SECCIÓN 5: OPTIMIZACIÓN DE BATERÍA (Malla en 2do Plano)
+                // SECCIÓN 5: BANDA DE FRECUENCIA (WIFI DIRECT)
                 // ==========================================
                 Text(
-                    text = "5. Batería y Malla en Segundo Plano:",
+                    text = "5. Banda de frecuencia (WiFi Direct):",
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 13.sp
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+
+                Card(
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                text = "Preferir banda de 5GHz",
+                                fontWeight = FontWeight.Medium,
+                                fontSize = 13.sp,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Switch(
+                                checked = prefer5Ghz,
+                                onCheckedChange = onPrefer5GhzChange,
+                                colors = SwitchDefaults.colors(
+                                    checkedThumbColor = Color.White,
+                                    checkedTrackColor = WhatsAppTeal
+                                )
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = if (prefer5Ghz) {
+                                "5GHz. Mayor velocidad pero menos alcance. Algunos móviles antiguos no podrán conectarse."
+                            } else {
+                                "2.4GHz (por defecto). Máxima compatibilidad. Todos los móviles pueden conectarse."
+                            },
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        if (prefer5Ghz) {
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(
+                                text = "Aviso: Si experimentas problemas de conexión, desactiva esta opción.",
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.error
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                // ==========================================
+                // SECCIÓN 6: OPTIMIZACIÓN DE BATERÍA (Malla en 2do Plano)
+                // ==========================================
+                Text(
+                    text = "6. Batería y Malla en Segundo Plano:",
                     fontWeight = FontWeight.SemiBold,
                     fontSize = 13.sp
                 )

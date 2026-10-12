@@ -50,4 +50,27 @@ interface ContactDao {
 
     @Query("DELETE FROM contacts WHERE phoneNumber LIKE '%000000%' OR phoneNumber = '+530000000' OR phoneNumber = '530000000' OR phoneNumber LIKE '%:%' OR length(phoneNumber) < 7")
     suspend fun deleteInvalidContacts()
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertAllIfNotExist(contacts: List<ContactEntity>)
+
+    @Query("""
+        UPDATE contacts SET
+            displayName = :displayName,
+            avatarUri = COALESCE(:avatarUri, avatarUri)
+        WHERE phoneNumber = :phone
+    """)
+    suspend fun updateContactProfileOnly(phone: String, displayName: String, avatarUri: String?)
+
+    @Query("DELETE FROM contacts WHERE phoneNumber = :phone")
+    suspend fun deleteContactByPhone(phone: String)
+
+    @Query("""
+        UPDATE contacts SET
+            phoneNumber = :newPhone,
+            displayName = COALESCE(NULLIF(displayName, ''), :newPhone),
+            isRegisteredInMesh = CASE WHEN isRegisteredInMesh = 1 THEN 1 ELSE 0 END
+        WHERE phoneNumber = :oldPhone
+    """)
+    suspend fun migratePhoneNumber(oldPhone: String, newPhone: String)
 }

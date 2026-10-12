@@ -17,8 +17,11 @@ import com.example.mesh.MeshEngineHolder
 import com.example.mesh.MeshEngineState
 import com.example.mesh.SimCardInfo
 import com.example.mesh.SimDetectionUtil
+import android.util.Log
+import com.example.mesh.MeshBandPreference
 import com.example.mesh.VideoQuality
 import com.example.mesh.WiFiMeshEngine
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 
@@ -31,7 +34,9 @@ class ChatMeshViewModel(application: Application) : AndroidViewModel(application
         database.meshNodeDao(),
         database.callDao(),
         database.storyDao(),
-        database.storySeenDao()
+        database.storySeenDao(),
+        database.groupDao(),
+        database.groupMemberDao()
     )
 
     private val meshEngine: WiFiMeshEngine =
@@ -127,10 +132,25 @@ class ChatMeshViewModel(application: Application) : AndroidViewModel(application
     val realSimDetails: StateFlow<SimCardInfo> = _realSimDetails.asStateFlow()
 
     // ============================================================
-    //  ESTADO DE REGISTRO MANUAL
+    //  ESTADO DE REGISTRO MANUAL & FALLBACK
     // ============================================================
     private val _registrationRequired = MutableStateFlow(false)
     val registrationRequired: StateFlow<Boolean> = _registrationRequired.asStateFlow()
+
+    private val _usingFallbackNumber = MutableStateFlow(false)
+    val usingFallbackNumber: StateFlow<Boolean> = _usingFallbackNumber.asStateFlow()
+
+    fun requestManualRegistration() {
+        _registrationRequired.value = true
+    }
+
+    private val _prefer5Ghz = MutableStateFlow(MeshBandPreference.prefer5Ghz(application))
+    val prefer5Ghz: StateFlow<Boolean> = _prefer5Ghz.asStateFlow()
+
+    fun setPrefer5Ghz(prefer: Boolean) {
+        MeshBandPreference.setPrefer5Ghz(getApplication(), prefer)
+        _prefer5Ghz.value = prefer
+    }
 
     private val _registrationError = MutableStateFlow<String?>(null)
     val registrationError: StateFlow<String?> = _registrationError.asStateFlow()
@@ -143,6 +163,18 @@ class ChatMeshViewModel(application: Application) : AndroidViewModel(application
     // ============================================================
     private val _selectedContact = MutableStateFlow<ContactEntity?>(null)
     val selectedContact: StateFlow<ContactEntity?> = _selectedContact.asStateFlow()
+
+    val allGroups: StateFlow<List<GroupEntity>> = repository.allGroupsFlow
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    private val _selectedGroup = MutableStateFlow<GroupEntity?>(null)
+    val selectedGroup: StateFlow<GroupEntity?> = _selectedGroup.asStateFlow()
+
+    private val _activeGroupMembers = MutableStateFlow<List<GroupMemberEntity>>(emptyList())
+    val activeGroupMembers: StateFlow<List<GroupMemberEntity>> = _activeGroupMembers.asStateFlow()
+
+    private val _activeGroupMessages = MutableStateFlow<List<MessageEntity>>(emptyList())
+    val activeGroupMessages: StateFlow<List<MessageEntity>> = _activeGroupMessages.asStateFlow()
 
     private val _activeMessages = MutableStateFlow<List<MessageEntity>>(emptyList())
     val activeMessages: StateFlow<List<MessageEntity>> = _activeMessages.asStateFlow()
@@ -198,27 +230,38 @@ class ChatMeshViewModel(application: Application) : AndroidViewModel(application
     }
 
     // ============================================================
-    //  BOOTSTRAP: detecta SIM → si no, registro manual
+    //  BOOTSTRAP: detecta SIM → guardado → fallback determinístico
     // ============================================================
     private suspend fun bootstrapUser() {
-        // 1. Intentar detectar número real de SIM
+        // 1. Intentar detectar número real de SIM (3 estrategias)
         val realPhone = SimDetectionUtil.detectRealPhoneNumber(getApplication())
         if (realPhone != null) {
+            Log.i("ChatMeshViewModel", "bootstrapUser: Fuente SIM detectada -> $realPhone")
             SimDetectionUtil.saveUserSimPhoneNumber(getApplication(), realPhone)
+            _usingFallbackNumber.value = false
             completeInitialization(realPhone, null)
             return
         }
 
-        // 2. ¿Ya hay un número guardado (manual o SIM previa)?
+        // 2. ¿Ya hay un número guardado (SIM previa, manual o fallback)?
         val saved = SimDetectionUtil.getCurrentPhoneNumber(getApplication())
         if (!saved.isNullOrBlank()) {
+            val source = SimDetectionUtil.getPhoneSource(getApplication()) ?: "MANUAL"
+            Log.i("ChatMeshViewModel", "bootstrapUser: Fuente guardada ($source) -> $saved")
+            _usingFallbackNumber.value = (source == "FALLBACK")
             val existing = repository.getUserProfile()
             completeInitialization(saved, existing?.nickname)
             return
         }
 
-        // 3. No hay nada → pedir registro manual
-        _registrationRequired.value = true
+        // 3. Auto-generar un número de fallback determinístico
+        val fallback = SimDetectionUtil.generateFallbackNumber(getApplication())
+        Log.i("ChatMeshViewModel", "bootstrapUser: Fuente FALLBACK generada -> $fallback")
+        SimDetectionUtil.saveFallbackPhoneNumber(getApplication(), fallback)
+        completeInitialization(fallback, null)
+
+        // 4. Marcar el estado para que la UI muestre un aviso discreto
+        _usingFallbackNumber.value = true
     }
 
     private suspend fun completeInitialization(phoneNumber: String, nicknameOverride: String?) {
@@ -268,6 +311,7 @@ class ChatMeshViewModel(application: Application) : AndroidViewModel(application
         }
 
         _registrationError.value = null
+        _usingFallbackNumber.value = false
         SimDetectionUtil.saveManualPhoneNumber(getApplication(), cleanPhone)
 
         viewModelScope.launch {
@@ -284,6 +328,7 @@ class ChatMeshViewModel(application: Application) : AndroidViewModel(application
 
     fun saveRealSimPhoneNumber(number: String) {
         SimDetectionUtil.saveUserSimPhoneNumber(getApplication(), number)
+        _usingFallbackNumber.value = false
         reloadSimDetails()
         viewModelScope.launch {
             val current = repository.getUserProfile()
@@ -340,6 +385,75 @@ class ChatMeshViewModel(application: Application) : AndroidViewModel(application
     fun sendFileMessage(fileName: String, fileUri: String) {
         val contact = _selectedContact.value ?: return
         meshEngine.sendChatMessage(contact.phoneNumber, fileName, "FILE", fileUri, null)
+    }
+
+    private var groupMessagesJob: Job? = null
+    private var groupMembersJob: Job? = null
+
+    fun selectGroup(group: GroupEntity?) {
+        _selectedGroup.value = group
+        groupMessagesJob?.cancel()
+        groupMembersJob?.cancel()
+        if (group != null) {
+            viewModelScope.launch {
+                repository.markGroupChatAsRead(group.groupId)
+            }
+            groupMessagesJob = viewModelScope.launch {
+                repository.getGroupConversationFlow(group.groupId).collect {
+                    _activeGroupMessages.value = it
+                }
+            }
+            groupMembersJob = viewModelScope.launch {
+                repository.getGroupMembersFlow(group.groupId).collect {
+                    _activeGroupMembers.value = it
+                }
+            }
+        } else {
+            _activeGroupMessages.value = emptyList()
+            _activeGroupMembers.value = emptyList()
+        }
+    }
+
+    fun createGroup(name: String, members: List<ContactEntity>) {
+        if (name.isBlank() || members.isEmpty()) return
+        val memberPairs = members.map { Pair(it.phoneNumber, it.displayName.ifBlank { it.phoneNumber }) }
+        meshEngine.createGroup(name.trim(), memberPairs)
+    }
+
+    fun sendGroupTextMessage(text: String) {
+        val group = _selectedGroup.value ?: return
+        if (text.isBlank()) return
+        meshEngine.sendGroupMessage(group.groupId, text.trim(), "TEXT")
+    }
+
+    fun sendGroupImageMessage(uri: String, caption: String, base64: String) {
+        val group = _selectedGroup.value ?: return
+        meshEngine.sendGroupMessage(group.groupId, caption, "IMAGE", uri, base64)
+    }
+
+    fun sendGroupAudioMessage(base64: String, duration: Int) {
+        val group = _selectedGroup.value ?: return
+        meshEngine.sendGroupMessage(group.groupId, "Mensaje de voz", "AUDIO", null, base64, duration)
+    }
+
+    fun sendGroupFileMessage(fileName: String, fileUri: String) {
+        val group = _selectedGroup.value ?: return
+        meshEngine.sendGroupMessage(group.groupId, fileName, "FILE", fileUri, null)
+    }
+
+    fun addGroupMember(groupId: String, phone: String, name: String) {
+        meshEngine.updateGroupMembers(groupId, listOf(Pair(phone, name)))
+    }
+
+    fun removeGroupMember(groupId: String, phone: String) {
+        meshEngine.removeGroupMember(groupId, phone)
+    }
+
+    fun leaveGroup(groupId: String) {
+        meshEngine.leaveGroup(groupId)
+        if (_selectedGroup.value?.groupId == groupId) {
+            selectGroup(null)
+        }
     }
 
     fun startAudioCall(contact: ContactEntity) { meshEngine.startCall(contact, isVideo = false) }

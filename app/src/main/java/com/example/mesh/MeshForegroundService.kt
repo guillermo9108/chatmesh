@@ -40,20 +40,28 @@ class MeshForegroundService : Service() {
         private var running = false
 
         fun start(ctx: Context) {
-            val appCtx = ctx.applicationContext
-            WifiDirectP2pService.start(appCtx)
-            val intent = Intent(appCtx, MeshForegroundService::class.java)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                appCtx.startForegroundService(intent)
-            } else {
-                appCtx.startService(intent)
+            try {
+                val appCtx = ctx.applicationContext
+                WifiDirectP2pService.start(appCtx)
+                val intent = Intent(appCtx, MeshForegroundService::class.java)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    appCtx.startForegroundService(intent)
+                } else {
+                    appCtx.startService(intent)
+                }
+            } catch (e: Exception) {
+                Log.e("MeshForegroundService", "Cannot start foreground service", e)
             }
         }
 
         fun stop(ctx: Context) {
-            ctx.applicationContext.stopService(
-                Intent(ctx.applicationContext, MeshForegroundService::class.java)
-            )
+            try {
+                ctx.applicationContext.stopService(
+                    Intent(ctx.applicationContext, MeshForegroundService::class.java)
+                )
+            } catch (e: Exception) {
+                Log.e("MeshForegroundService", "Cannot stop foreground service", e)
+            }
         }
     }
 
@@ -67,8 +75,26 @@ class MeshForegroundService : Service() {
         super.onCreate()
         running = true
 
-        createNotificationChannel()
-        startForeground(NOTIFICATION_ID, buildNotification("Malla P2P activa • Supervisando"))
+        try {
+            createNotificationChannel()
+            val notif = buildNotification("Malla P2P activa • Supervisando")
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                try {
+                    startForeground(
+                        NOTIFICATION_ID,
+                        notif,
+                        android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+                    )
+                } catch (e: Exception) {
+                    Log.w("MeshForegroundService", "startForeground with type failed, falling back", e)
+                    startForeground(NOTIFICATION_ID, notif)
+                }
+            } else {
+                startForeground(NOTIFICATION_ID, notif)
+            }
+        } catch (e: Exception) {
+            Log.e("MeshForegroundService", "Failed to startForeground", e)
+        }
 
         acquireWakeLock()
 
@@ -82,7 +108,9 @@ class MeshForegroundService : Service() {
                 db.meshNodeDao(),
                 db.callDao(),
                 db.storyDao(),
-                db.storySeenDao()
+                db.storySeenDao(),
+                db.groupDao(),
+                db.groupMemberDao()
             )
             MeshEngineHolder.init(applicationContext, repo)
         } catch (_: Exception) {
@@ -111,7 +139,9 @@ class MeshForegroundService : Service() {
                                 db.meshNodeDao(),
                                 db.callDao(),
                                 db.storyDao(),
-                                db.storySeenDao()
+                                db.storySeenDao(),
+                                db.groupDao(),
+                                db.groupMemberDao()
                             )
                             MeshEngineHolder.init(applicationContext, repo)
                         } catch (_: Exception) {}

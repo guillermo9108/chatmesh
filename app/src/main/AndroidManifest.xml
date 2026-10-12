@@ -83,7 +83,7 @@
         <service
             android:name="com.example.mesh.MeshForegroundService"
             android:exported="false"
-            android:foregroundServiceType="connectedDevice|dataSync" />
+            android:foregroundServiceType="dataSync" />
 
         <service
             android:name="com.example.mesh.WifiDirectP2pService"

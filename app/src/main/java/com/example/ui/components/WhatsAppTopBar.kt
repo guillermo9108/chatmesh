@@ -50,6 +50,7 @@ fun WhatsAppTopBar(
     onSearchQueryChange: (String) -> Unit = {},
     onSearchActiveChange: (Boolean) -> Unit = {},
     onCameraClick: () -> Unit = {},
+    onNewGroupClick: () -> Unit = {},
     onProfileClick: () -> Unit,
     onSyncContactsClick: () -> Unit,
     onSimConfigClick: () -> Unit,
@@ -240,6 +241,14 @@ fun WhatsAppTopBar(
                                 onDismissRequest = { menuExpanded = false },
                                 modifier = Modifier.background(MaterialTheme.colorScheme.surface)
                             ) {
+                                DropdownMenuItem(
+                                    text = { Text("Nuevo grupo") },
+                                    leadingIcon = { Icon(Icons.Default.GroupAdd, contentDescription = null, tint = WhatsAppGreenPrimary) },
+                                    onClick = {
+                                        menuExpanded = false
+                                        onNewGroupClick()
+                                    }
+                                )
                                 DropdownMenuItem(
                                     text = { Text("Mi Perfil") },
                                     leadingIcon = { Icon(Icons.Default.Person, contentDescription = null, tint = WhatsAppGreenPrimary) },

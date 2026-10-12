@@ -39,6 +39,14 @@ object SimDetectionUtil {
                                 if (isValidPhoneNumber(num)) return sanitizePhoneNumber(num!!)
                             } catch (_: Exception) {}
                         }
+                        // Intentar también getNumber() de cada SubscriptionInfo
+                        for (sub in subs) {
+                            try {
+                                @Suppress("DEPRECATION")
+                                val num2 = sub.number
+                                if (isValidPhoneNumber(num2)) return sanitizePhoneNumber(num2)
+                            } catch (_: Exception) {}
+                        }
                     }
                 }
             } catch (_: Exception) {}
@@ -61,8 +69,15 @@ object SimDetectionUtil {
                         for (sub in subs) {
                             try {
                                 val perSubTm = tm.createForSubscriptionId(sub.subscriptionId)
-                                val num = perSubTm.line1Number
-                                if (isValidPhoneNumber(num)) return sanitizePhoneNumber(num!!)
+                                // Probar múltiples fuentes
+                                val candidates = listOf(
+                                    perSubTm.line1Number,
+                                    perSubTm.voiceMailNumber,
+                                    perSubTm.subscriberId  // A veces contiene el número en operadores antiguos
+                                )
+                                for (num in candidates) {
+                                    if (isValidPhoneNumber(num)) return sanitizePhoneNumber(num!!)
+                                }
                             } catch (_: Exception) {}
                         }
                     }
@@ -183,6 +198,35 @@ object SimDetectionUtil {
     fun getPhoneSource(context: Context): String? {
         return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             .getString(KEY_PHONE_SOURCE, null)
+    }
+
+    /**
+     * Genera un número de fallback determinístico a partir del deviceFingerprint.
+     * El mismo dispositivo siempre genera el mismo número, así los peers lo
+     * reconocen entre reinstalaciones.
+     *
+     * Rango reservado: +5358000000 a +5358999999
+     */
+    fun generateFallbackNumber(context: Context): String {
+        val fingerprint = DeviceIdentity.getDeviceFingerprint(context)
+        val hash = fingerprint.hashCode().let { if (it < 0) -it else it }
+        val suffix = (hash % 1000000).toString().padStart(6, '0')
+        return "+5358$suffix"
+    }
+
+    /** Marca la fuente del número como FALLBACK (auto-generado). */
+    fun saveFallbackPhoneNumber(context: Context, phoneNumber: String) {
+        val clean = sanitizePhoneNumber(phoneNumber)
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putString(KEY_USER_PHONE, clean)
+            .putString(KEY_PHONE_SOURCE, "FALLBACK")
+            .putBoolean(KEY_IS_CONFIRMED, true)
+            .apply()
+    }
+
+    fun isFallbackNumber(context: Context): Boolean {
+        return getPhoneSource(context) == "FALLBACK"
     }
 
     // ============================================================

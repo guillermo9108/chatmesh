@@ -9,8 +9,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Chat
-import androidx.compose.material.icons.filled.Done
 import androidx.compose.material.icons.filled.DoneAll
+import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
@@ -25,43 +25,73 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.entity.ContactEntity
+import com.example.data.entity.GroupEntity
+import com.example.ui.components.GroupAvatar
 import com.example.ui.components.OnlineUsersRow
 import com.example.ui.components.UserAvatar
 import com.example.ui.theme.*
 import java.text.SimpleDateFormat
 import java.util.*
 
+sealed class ChatListItem {
+    abstract val timestamp: Long
+    abstract val id: String
+
+    data class DirectChat(val contact: ContactEntity) : ChatListItem() {
+        override val timestamp: Long get() = contact.lastMessageTime
+        override val id: String get() = "contact_${contact.phoneNumber}"
+    }
+
+    data class GroupChat(val group: GroupEntity) : ChatListItem() {
+        override val timestamp: Long get() = group.lastMessageTime
+        override val id: String get() = "group_${group.groupId}"
+    }
+}
+
 @Composable
 fun ChatsTab(
     chats: List<ContactEntity>,
+    groups: List<GroupEntity> = emptyList(),
     onlineContacts: List<ContactEntity> = emptyList(),
     onChatClick: (ContactEntity) -> Unit,
+    onGroupClick: (GroupEntity) -> Unit = {},
     filterChip: String = "Todos",
     searchQuery: String = "",
     onOpenContacts: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
-    val filteredChats = remember(chats, filterChip, searchQuery) {
-        var list = chats
+    val unifiedItems = remember(chats, groups, filterChip, searchQuery) {
+        val directItems = chats.map { ChatListItem.DirectChat(it) }
+        val groupItems = groups.map { ChatListItem.GroupChat(it) }
 
-        // Filtrado por chip
-        list = when (filterChip) {
-            "No leídos" -> list.filter { it.unreadCount > 0 }
-            "Favoritos" -> list.filter { it.unreadCount > 0 || it.isConnected }
-            "Malla P2P" -> list.filter { it.isConnected || it.isRegisteredInMesh }
-            else -> list
+        var list: List<ChatListItem> = when (filterChip) {
+            "Grupos" -> groupItems
+            "No leídos" -> (directItems.filter { it.contact.unreadCount > 0 } +
+                    groupItems.filter { it.group.unreadCount > 0 })
+            "Favoritos" -> (directItems.filter { it.contact.unreadCount > 0 || it.contact.isConnected } +
+                    groupItems.filter { it.group.unreadCount > 0 })
+            "Malla P2P" -> directItems.filter { it.contact.isConnected || it.contact.isRegisteredInMesh }
+            else -> directItems + groupItems
         }
 
-        // Filtrado por texto de búsqueda
         if (searchQuery.isNotBlank()) {
             val q = searchQuery.trim().lowercase()
-            list = list.filter {
-                it.displayName.lowercase().contains(q) ||
-                it.phoneNumber.lowercase().contains(q) ||
-                (it.lastMessageText?.lowercase()?.contains(q) == true)
+            list = list.filter { item ->
+                when (item) {
+                    is ChatListItem.DirectChat -> {
+                        item.contact.displayName.lowercase().contains(q) ||
+                                item.contact.phoneNumber.lowercase().contains(q) ||
+                                (item.contact.lastMessageText?.lowercase()?.contains(q) == true)
+                    }
+                    is ChatListItem.GroupChat -> {
+                        item.group.name.lowercase().contains(q) ||
+                                (item.group.lastMessageText?.lowercase()?.contains(q) == true)
+                    }
+                }
             }
         }
-        list
+
+        list.sortedByDescending { it.timestamp }
     }
 
     Column(
@@ -76,7 +106,7 @@ fun ChatsTab(
             onContactClick = onChatClick
         )
 
-        if (filteredChats.isEmpty()) {
+        if (unifiedItems.isEmpty()) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -98,24 +128,31 @@ fun ChatsTab(
                             )
                         }
                     }
+
                     Spacer(modifier = Modifier.height(20.dp))
+
                     Text(
-                        text = if (searchQuery.isNotEmpty()) "No se encontraron chats" else "No tienes conversaciones activas",
+                        text = if (searchQuery.isNotBlank()) "No se encontraron resultados" else "Sin chats activos",
+                        style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
-                        fontSize = 18.sp,
                         color = MaterialTheme.colorScheme.onSurface
                     )
-                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Spacer(modifier = Modifier.height(6.dp))
+
                     Text(
-                        text = if (searchQuery.isNotEmpty())
-                            "Intenta con otro nombre o número de teléfono."
+                        text = if (searchQuery.isNotBlank())
+                            "No hay conversaciones que coincidan con \"$searchQuery\"."
                         else
-                            "Inicia una conversación directa sin internet con tus amigos cercanos en la red malla.",
-                        fontSize = 14.sp,
+                            "Selecciona un contacto o crea un grupo para comenzar.",
+                        style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                        modifier = Modifier.padding(horizontal = 16.dp)
                     )
-                    Spacer(modifier = Modifier.height(20.dp))
+
+                    Spacer(modifier = Modifier.height(24.dp))
+
                     Button(
                         onClick = onOpenContacts,
                         colors = ButtonDefaults.buttonColors(containerColor = WhatsAppGreenPrimary),
@@ -132,13 +169,25 @@ fun ChatsTab(
                     .testTag("chats_list"),
                 contentPadding = PaddingValues(bottom = 80.dp)
             ) {
-                items(filteredChats, key = { it.phoneNumber }) { contact ->
-                    val isUserOnline = contact.isConnected || onlineContacts.any { it.phoneNumber == contact.phoneNumber }
-                    ChatItemRow(
-                        contact = contact,
-                        isOnline = isUserOnline,
-                        onClick = { onChatClick(contact) }
-                    )
+                items(unifiedItems, key = { it.id }) { item ->
+                    when (item) {
+                        is ChatListItem.DirectChat -> {
+                            val contact = item.contact
+                            val isUserOnline = contact.isConnected || onlineContacts.any { it.phoneNumber == contact.phoneNumber }
+                            ChatItemRow(
+                                contact = contact,
+                                isOnline = isUserOnline,
+                                onClick = { onChatClick(contact) }
+                            )
+                        }
+                        is ChatListItem.GroupChat -> {
+                            val group = item.group
+                            GroupItemRow(
+                                group = group,
+                                onClick = { onGroupClick(group) }
+                            )
+                        }
+                    }
                     HorizontalDivider(
                         modifier = Modifier.padding(start = 74.dp),
                         color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f),
@@ -163,10 +212,106 @@ fun ChatsTab(
                         )
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = "Tus mensajes personales están encriptados y viajan de extremo a extremo por la malla.",
+                            text = "Tus mensajes personales y grupales están protegidos por la red malla P2P.",
                             fontSize = 11.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
                             textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun GroupItemRow(
+    group: GroupEntity,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 11.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        GroupAvatar(
+            avatarUri = group.avatarUri,
+            groupName = group.name,
+            size = 52.dp
+        )
+
+        Spacer(modifier = Modifier.width(14.dp))
+
+        Column(modifier = Modifier.weight(1f)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = group.name,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 16.sp,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false)
+                )
+
+                if (group.lastMessageTime > 0) {
+                    val timeStr = formatWhatsAppTime(group.lastMessageTime)
+                    Text(
+                        text = timeStr,
+                        fontSize = 12.sp,
+                        fontWeight = if (group.unreadCount > 0) FontWeight.Bold else FontWeight.Normal,
+                        color = if (group.unreadCount > 0) WhatsAppGreenPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(3.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    modifier = Modifier.weight(1f),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Group,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                        modifier = Modifier.size(15.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        text = group.lastMessageText ?: "Grupo creado",
+                        fontSize = 14.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+
+                if (group.unreadCount > 0) {
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Box(
+                        modifier = Modifier
+                            .clip(CircleShape)
+                            .background(WhatsAppGreenPrimary)
+                            .padding(horizontal = 6.5.dp, vertical = 2.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = group.unreadCount.toString(),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
                         )
                     }
                 }
@@ -188,7 +333,6 @@ fun ChatItemRow(
             .padding(horizontal = 16.dp, vertical = 11.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Avatar circular auténtico con indicador en línea
         Box(contentAlignment = Alignment.Center) {
             UserAvatar(
                 avatarUri = contact.avatarUri,
@@ -217,7 +361,6 @@ fun ChatItemRow(
 
         Spacer(modifier = Modifier.width(14.dp))
 
-        // Contenido del chat
         Column(modifier = Modifier.weight(1f)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -256,7 +399,6 @@ fun ChatItemRow(
                     modifier = Modifier.weight(1f),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // Si el último mensaje es del usuario, mostrar doble palomita azul o gris
                     if (contact.lastMessageText != null) {
                         Icon(
                             imageVector = Icons.Default.DoneAll,

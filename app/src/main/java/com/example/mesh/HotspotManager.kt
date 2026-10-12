@@ -11,7 +11,11 @@ import android.util.Log
  */
 class HotspotManager(private val context: Context) {
 
-    private val TAG = "HotspotManager"
+    companion object {
+        private const val TAG = "HotspotManager"
+        const val BAND_INFO_MESSAGE = "El punto de acceso local usa la banda que el sistema determine automáticamente. Si tienes problemas de compatibilidad, activa el Punto de Acceso nativo de Android en Ajustes y selecciona 2.4GHz manualmente."
+    }
+
     private var reservation: WifiManager.LocalOnlyHotspotReservation? = null
     private var activeSsid: String = ""
     private var activePassword: String = ""
@@ -96,6 +100,9 @@ class HotspotManager(private val context: Context) {
                     activePassword = ""
 
                     val isEmulator = isEmulator()
+                    // NOTA: LocalOnlyHotspot no permite elegir banda desde API pública.
+                    // Si el dispositivo está en 5GHz y falla, recomendamos al usuario
+                    // activar el punto de acceso nativo desde Ajustes del sistema.
                     val userMessage = when (reason) {
                         1 -> "No hay canales Wi-Fi disponibles para el punto de acceso (código 1)."
                         2 -> if (isEmulator) {

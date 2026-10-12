@@ -9,7 +9,8 @@ import androidx.room.PrimaryKey
     indices = [
         Index(value = ["messageUuid"], unique = true),
         Index(value = ["senderPhone"]),
-        Index(value = ["recipientPhone"])
+        Index(value = ["recipientPhone"]),
+        Index(value = ["recipientGroupId"])
     ]
 )
 data class MessageEntity(
@@ -17,7 +18,8 @@ data class MessageEntity(
     val id: Long = 0,
     val messageUuid: String,
     val senderPhone: String,
-    val recipientPhone: String,
+    val recipientPhone: String? = null,
+    val recipientGroupId: String? = null,
     val content: String,
     val mediaType: String = "TEXT",
     val mediaUri: String? = null,

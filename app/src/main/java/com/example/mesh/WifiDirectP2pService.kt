@@ -37,26 +37,26 @@ class WifiDirectP2pService : Service() {
             private set
 
         fun start(context: Context) {
-            val intent = Intent(context, WifiDirectP2pService::class.java)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            try {
+                val intent = Intent(context, WifiDirectP2pService::class.java)
                 context.startService(intent)
-            } else {
-                context.startService(intent)
+            } catch (e: Exception) {
+                Log.e(TAG, "Cannot start WifiDirectP2pService", e)
             }
         }
     }
 
     private val binder = LocalBinder()
     private val serviceScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
-    private lateinit var p2pManager: P2PManager
+    private val p2pCore: P2PManager by lazy { P2PManager.getInstance(applicationContext) }
 
     // Expose state flows from P2PManager
-    val isWifiP2pEnabled: StateFlow<Boolean> get() = p2pManager.isWifiP2pEnabled
-    val isDiscoveryActive: StateFlow<Boolean> get() = p2pManager.isDiscoveryActive
-    val peers: StateFlow<List<WifiP2pDevice>> get() = p2pManager.peers
-    val connectionInfo: StateFlow<WifiP2pInfo?> get() = p2pManager.connectionInfo
-    val thisDevice: StateFlow<WifiP2pDevice?> get() = p2pManager.thisDevice
-    val p2pGroup: StateFlow<WifiP2pGroup?> get() = p2pManager.groupInfo
+    val isWifiP2pEnabled: StateFlow<Boolean> get() = p2pCore.isWifiP2pEnabled
+    val isDiscoveryActive: StateFlow<Boolean> get() = p2pCore.isDiscoveryActive
+    val peers: StateFlow<List<WifiP2pDevice>> get() = p2pCore.peers
+    val connectionInfo: StateFlow<WifiP2pInfo?> get() = p2pCore.connectionInfo
+    val thisDevice: StateFlow<WifiP2pDevice?> get() = p2pCore.thisDevice
+    val p2pGroup: StateFlow<WifiP2pGroup?> get() = p2pCore.groupInfo
 
     inner class LocalBinder : Binder() {
         fun getService(): WifiDirectP2pService = this@WifiDirectP2pService
@@ -65,9 +65,12 @@ class WifiDirectP2pService : Service() {
     override fun onCreate() {
         super.onCreate()
         instance = this
-        p2pManager = P2PManager.getInstance(applicationContext)
-        p2pManager.initialize()
-        Log.i(TAG, "WifiDirectP2pService created with P2PManager")
+        try {
+            p2pCore.initialize()
+            Log.i(TAG, "WifiDirectP2pService created with P2PManager")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed initializing p2pCore in WifiDirectP2pService", e)
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -95,21 +98,21 @@ class WifiDirectP2pService : Service() {
     //  PEER DISCOVERY MANAGEMENT
     // ============================================================
     fun startPeerDiscovery(listener: ActionListener? = null) {
-        p2pManager.discoverPeers(
+        p2pCore.discoverPeers(
             onSuccess = { listener?.onSuccess() },
             onFailure = { reason -> listener?.onFailure(reason) }
         )
     }
 
     fun stopPeerDiscovery(listener: ActionListener? = null) {
-        p2pManager.stopPeerDiscovery(
+        p2pCore.stopPeerDiscovery(
             onSuccess = { listener?.onSuccess() },
             onFailure = { reason -> listener?.onFailure(reason) }
         )
     }
 
     fun requestPeers(listener: PeerListListener? = null) {
-        p2pManager.requestPeers(listener)
+        p2pCore.requestPeers(listener)
     }
 
     // ============================================================
@@ -120,7 +123,7 @@ class WifiDirectP2pService : Service() {
         groupOwnerIntent: Int = 0,
         listener: ActionListener? = null
     ) {
-        p2pManager.connectToDevice(
+        p2pCore.connectToDevice(
             deviceAddress = deviceAddress,
             groupOwnerIntent = groupOwnerIntent,
             onSuccess = { listener?.onSuccess() },
@@ -129,7 +132,7 @@ class WifiDirectP2pService : Service() {
     }
 
     fun connect(config: WifiP2pConfig, listener: ActionListener? = null) {
-        p2pManager.connect(
+        p2pCore.connect(
             config = config,
             onSuccess = { listener?.onSuccess() },
             onFailure = { reason -> listener?.onFailure(reason) }
@@ -137,14 +140,14 @@ class WifiDirectP2pService : Service() {
     }
 
     fun cancelConnect(listener: ActionListener? = null) {
-        p2pManager.cancelConnect(
+        p2pCore.cancelConnect(
             onSuccess = { listener?.onSuccess() },
             onFailure = { reason -> listener?.onFailure(reason) }
         )
     }
 
     fun createGroup(listener: ActionListener? = null) {
-        p2pManager.createGroup(
+        p2pCore.createGroup(
             config = null,
             onSuccess = { listener?.onSuccess() },
             onFailure = { reason -> listener?.onFailure(reason) }
@@ -152,48 +155,48 @@ class WifiDirectP2pService : Service() {
     }
 
     fun removeGroup(listener: ActionListener? = null) {
-        p2pManager.removeGroup(
+        p2pCore.removeGroup(
             onSuccess = { listener?.onSuccess() },
             onFailure = { reason -> listener?.onFailure(reason) }
         )
     }
 
     fun requestConnectionInfo(listener: ConnectionInfoListener? = null) {
-        p2pManager.requestConnectionInfo(listener)
+        p2pCore.requestConnectionInfo(listener)
     }
 
     fun requestGroupInfo(listener: GroupInfoListener? = null) {
-        p2pManager.requestGroupInfo(listener)
+        p2pCore.requestGroupInfo(listener)
     }
 
     // ============================================================
     //  OBSERVERS
     // ============================================================
     fun addPeerListener(listener: (List<WifiP2pDevice>) -> Unit) {
-        p2pManager.addPeerListener(listener)
+        p2pCore.addPeerListener(listener)
     }
 
     fun removePeerListener(listener: (List<WifiP2pDevice>) -> Unit) {
-        p2pManager.removePeerListener(listener)
+        p2pCore.removePeerListener(listener)
     }
 
     fun addConnectionListener(listener: (WifiP2pInfo) -> Unit) {
-        p2pManager.addConnectionListener(listener)
+        p2pCore.addConnectionListener(listener)
     }
 
     fun removeConnectionListener(listener: (WifiP2pInfo) -> Unit) {
-        p2pManager.removeConnectionListener(listener)
+        p2pCore.removeConnectionListener(listener)
     }
 
     fun addGroupListener(listener: (WifiP2pGroup?) -> Unit) {
-        p2pManager.addGroupListener(listener)
+        p2pCore.addGroupListener(listener)
     }
 
     fun removeGroupListener(listener: (WifiP2pGroup?) -> Unit) {
-        p2pManager.removeGroupListener(listener)
+        p2pCore.removeGroupListener(listener)
     }
 
-    fun getManager(): WifiP2pManager? = p2pManager.getManager()
-    fun getChannel(): Channel? = p2pManager.getChannel()
-    fun getP2pManager(): P2PManager = p2pManager
+    fun getManager(): WifiP2pManager? = p2pCore.getManager()
+    fun getChannel(): Channel? = p2pCore.getChannel()
+    fun getP2pManager(): P2PManager = p2pCore
 }

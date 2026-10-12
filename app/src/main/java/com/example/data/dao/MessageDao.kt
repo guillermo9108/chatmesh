@@ -29,4 +29,13 @@ interface MessageDao {
 
     @Query("UPDATE messages SET status = 'READ' WHERE senderPhone = :senderPhone AND isOutgoing = 0")
     suspend fun markConversationAsRead(senderPhone: String)
+
+    @Query("UPDATE messages SET senderPhone = :newPhone WHERE senderPhone = :oldPhone")
+    suspend fun updateSenderPhone(oldPhone: String, newPhone: String)
+
+    @Query("UPDATE messages SET recipientPhone = :newPhone WHERE recipientPhone = :oldPhone")
+    suspend fun updateRecipientPhone(oldPhone: String, newPhone: String)
+
+    @Query("SELECT * FROM messages WHERE recipientGroupId = :groupId ORDER BY timestamp ASC")
+    fun getGroupConversationFlow(groupId: String): Flow<List<MessageEntity>>
 }

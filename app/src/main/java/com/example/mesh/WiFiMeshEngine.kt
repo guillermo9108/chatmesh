@@ -22,11 +22,15 @@ import android.os.Build
 import android.util.Log
 import com.example.data.entity.CallEntity
 import com.example.data.entity.ContactEntity
+import com.example.data.entity.GroupEntity
+import com.example.data.entity.GroupMemberEntity
 import com.example.data.entity.MeshNodeEntity
 import com.example.data.entity.MessageEntity
 import com.example.data.entity.StoryEntity
 import com.example.data.entity.StorySeenEntity
 import com.example.data.repository.ChatMeshRepository
+import org.json.JSONArray
+import org.json.JSONObject
 import com.example.util.CallRingtonePlayer
 import com.example.util.NotificationHelper
 import kotlinx.coroutines.*
@@ -660,19 +664,15 @@ class WiFiMeshEngine(
 
     private fun registerNodeFromDnsSd(name: String, phone: String, macAddress: String) {
         scope.launch {
-            val contact = repository.getContact(phone)
-            if (contact == null) {
-                repository.insertContact(
-                    ContactEntity(
-                        phoneNumber = phone,
-                        displayName = name,
-                        isRegisteredInMesh = true,
-                        isConnected = true
-                    )
+            repository.saveContactPreservingChat(
+                ContactEntity(
+                    phoneNumber = phone,
+                    displayName = name,
+                    isRegisteredInMesh = true,
+                    isConnected = true,
+                    lastSeen = System.currentTimeMillis()
                 )
-            } else {
-                repository.updateConnectionStatus(phone, true, System.currentTimeMillis())
-            }
+            )
         }
     }
 
@@ -690,10 +690,17 @@ class WiFiMeshEngine(
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             try {
-                val config = WifiP2pConfig.Builder()
+                val band = MeshBandPreference.getBandConstant(context)
+                val builder = WifiP2pConfig.Builder()
                     .setNetworkName(netName)
                     .setPassphrase(MESH_GLOBAL_PASSPHRASE)
-                    .build()
+                if (band >= 0) {
+                    try {
+                        builder.setGroupOperatingBand(band)
+                        Log.i(TAG, "WiFi Direct creado en banda: ${if (band == 0) "2.4GHz" else "5GHz"}")
+                    } catch (_: Exception) {}
+                }
+                val config = builder.build()
                 p2pCoreManager.createGroup(config,
                     onSuccess = {
                         Log.i(TAG, "Grupo WiFi Direct creado: $netName")
@@ -815,15 +822,40 @@ class WiFiMeshEngine(
     }
 
     fun connectToPeer(device: WifiP2pDevice) {
-        @Suppress("DEPRECATION")
-        val config = WifiP2pConfig().apply {
-            deviceAddress = device.deviceAddress
-            groupOwnerIntent = 15
-            wps.setup = WpsInfo.PBC
+        val ch = p2pChannel ?: return
+
+        val config = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            try {
+                val band = MeshBandPreference.getBandConstant(context)
+                val builder = WifiP2pConfig.Builder()
+                    .setDeviceAddress(android.net.MacAddress.fromString(device.deviceAddress))
+                if (band >= 0) {
+                    try {
+                        builder.setGroupOperatingBand(band)
+                        Log.i(TAG, "WiFi Direct connectToPeer en banda: ${if (band == 0) "2.4GHz" else "5GHz"}")
+                    } catch (_: Exception) {}
+                }
+                builder.build().apply {
+                    @Suppress("DEPRECATION")
+                    groupOwnerIntent = 15
+                }
+            } catch (_: Exception) {
+                @Suppress("DEPRECATION")
+                WifiP2pConfig().apply {
+                    deviceAddress = device.deviceAddress
+                    groupOwnerIntent = 15
+                    wps.setup = WpsInfo.PBC
+                }
+            }
+        } else {
+            @Suppress("DEPRECATION")
+            WifiP2pConfig().apply {
+                deviceAddress = device.deviceAddress
+                groupOwnerIntent = 15
+                wps.setup = WpsInfo.PBC
+            }
         }
 
-        // Si el otro ya está anunciado como GO autónomo en el discovery, conectar
-        // con PBC debería ser silencioso. PBC es el modo que menos diálogos genera.
         if (_engineState.value.isGroupOwner && _engineState.value.connectedPeersCount == 0) {
             p2pCoreManager.removeGroup(
                 onSuccess = { doConnect(config, device.deviceName) },
@@ -922,19 +954,15 @@ class WiFiMeshEngine(
                     name = devName,
                     ip = if (!_engineState.value.isGroupOwner) "192.168.49.1" else null
                 )
-                val contact = repository.getContact(cleanPhone)
-                if (contact == null) {
-                    repository.insertContact(
-                        ContactEntity(
-                            phoneNumber = cleanPhone,
-                            displayName = devName,
-                            isRegisteredInMesh = true,
-                            isConnected = isConnected
-                        )
+                repository.saveContactPreservingChat(
+                    ContactEntity(
+                        phoneNumber = cleanPhone,
+                        displayName = devName,
+                        isRegisteredInMesh = true,
+                        isConnected = isConnected,
+                        lastSeen = System.currentTimeMillis()
                     )
-                } else {
-                    repository.updateConnectionStatus(cleanPhone, isConnected, System.currentTimeMillis())
-                }
+                )
             }
         }
     }
@@ -1322,6 +1350,290 @@ class WiFiMeshEngine(
         }
     }
 
+    fun createGroup(name: String, memberPhones: List<Pair<String, String>>) {
+        scope.launch {
+            val groupId = UUID.randomUUID().toString()
+            val myPhone = _engineState.value.myPhoneNumber
+            val myName = _engineState.value.myNickname.ifBlank { "Yo" }
+            Log.i(TAG, "GROUP_CREATE creando grupo '$name' con id=$groupId")
+
+            val group = GroupEntity(
+                groupId = groupId,
+                name = name,
+                createdByPhone = myPhone,
+                createdAt = System.currentTimeMillis(),
+                isActive = true
+            )
+            repository.saveGroup(group)
+
+            val allMembers = mutableListOf<GroupMemberEntity>()
+            allMembers.add(
+                GroupMemberEntity(
+                    groupId = groupId,
+                    phoneNumber = myPhone,
+                    displayName = myName,
+                    isAdmin = true
+                )
+            )
+            memberPhones.forEach { (phone, dispName) ->
+                allMembers.add(
+                    GroupMemberEntity(
+                        groupId = groupId,
+                        phoneNumber = phone,
+                        displayName = dispName,
+                        isAdmin = false
+                    )
+                )
+            }
+            repository.saveGroupMembers(allMembers)
+
+            val membersArray = JSONArray()
+            allMembers.forEach { m ->
+                val obj = JSONObject()
+                obj.put("phone", m.phoneNumber)
+                obj.put("name", m.displayName)
+                obj.put("isAdmin", m.isAdmin)
+                membersArray.put(obj)
+            }
+            val membersJson = membersArray.toString()
+
+            memberPhones.forEach { (phone, _) ->
+                val packet = MeshPacket(
+                    packetType = "GROUP_CREATE",
+                    sourceNodeId = _engineState.value.myNodeId,
+                    sourcePhone = myPhone,
+                    sourceName = myName,
+                    sourceSsid = _engineState.value.ssid,
+                    sourceAvatar = _engineState.value.myAvatarUri,
+                    destinationPhone = phone,
+                    groupId = groupId,
+                    groupName = name,
+                    groupMembersJson = membersJson,
+                    groupAction = "CREATE"
+                )
+                transmitMeshPacketSync(packet)
+            }
+        }
+    }
+
+    fun sendGroupMessage(
+        groupId: String,
+        content: String,
+        mediaType: String = "TEXT",
+        mediaUri: String? = null,
+        mediaData: String? = null,
+        audioDuration: Int = 0
+    ) {
+        scope.launch {
+            val messageUuid = UUID.randomUUID().toString()
+            val myPhone = _engineState.value.myPhoneNumber
+            val myName = _engineState.value.myNickname.ifBlank { "Usuario" }
+            Log.i(TAG, "GROUP_MESSAGE enviando para grupo=$groupId, uuid=$messageUuid, tipo=$mediaType")
+
+            val entity = MessageEntity(
+                messageUuid = messageUuid,
+                senderPhone = myPhone,
+                recipientPhone = null,
+                recipientGroupId = groupId,
+                content = content,
+                mediaType = mediaType,
+                mediaUri = mediaUri,
+                mediaBase64 = mediaData,
+                timestamp = System.currentTimeMillis(),
+                status = "PENDING",
+                isOutgoing = true,
+                audioDurationSeconds = audioDuration
+            )
+            repository.saveMessage(entity)
+
+            val members = repository.getGroupMembersList(groupId)
+                .filter { it.phoneNumber != myPhone }
+
+            val rawData = mediaData.orEmpty()
+            if (rawData.length > MEDIA_CHUNK_SIZE) {
+                val totalChunks = (rawData.length + MEDIA_CHUNK_SIZE - 1) / MEDIA_CHUNK_SIZE
+                for (i in 0 until totalChunks) {
+                    val start = i * MEDIA_CHUNK_SIZE
+                    val end = minOf(start + MEDIA_CHUNK_SIZE, rawData.length)
+                    val chunkData = rawData.substring(start, end)
+                    members.forEach { m ->
+                        val packet = MeshPacket(
+                            packetType = "GROUP_MESSAGE_CHUNK",
+                            packetUuid = messageUuid,
+                            sourceNodeId = _engineState.value.myNodeId,
+                            sourcePhone = myPhone,
+                            sourceName = myName,
+                            sourceSsid = _engineState.value.ssid,
+                            sourceAvatar = _engineState.value.myAvatarUri,
+                            destinationPhone = m.phoneNumber,
+                            groupId = groupId,
+                            content = content,
+                            mediaType = mediaType,
+                            mediaData = chunkData,
+                            audioDuration = audioDuration,
+                            chunkIndex = i,
+                            totalChunks = totalChunks
+                        )
+                        transmitMeshPacketSync(packet)
+                    }
+                    delay(CHUNK_DELAY_MS)
+                }
+                members.forEach { m ->
+                    val finalPacket = MeshPacket(
+                        packetType = "GROUP_MESSAGE_END",
+                        packetUuid = messageUuid,
+                        sourceNodeId = _engineState.value.myNodeId,
+                        sourcePhone = myPhone,
+                        sourceName = myName,
+                        sourceSsid = _engineState.value.ssid,
+                        sourceAvatar = _engineState.value.myAvatarUri,
+                        destinationPhone = m.phoneNumber,
+                        groupId = groupId,
+                        content = content,
+                        mediaType = mediaType,
+                        mediaData = null,
+                        audioDuration = audioDuration,
+                        chunkIndex = totalChunks,
+                        totalChunks = totalChunks
+                    )
+                    transmitMeshPacketSync(finalPacket)
+                }
+            } else {
+                members.forEach { m ->
+                    val packet = MeshPacket(
+                        packetType = "GROUP_MESSAGE",
+                        packetUuid = messageUuid,
+                        sourceNodeId = _engineState.value.myNodeId,
+                        sourcePhone = myPhone,
+                        sourceName = myName,
+                        sourceSsid = _engineState.value.ssid,
+                        sourceAvatar = _engineState.value.myAvatarUri,
+                        destinationPhone = m.phoneNumber,
+                        groupId = groupId,
+                        content = content,
+                        mediaType = mediaType,
+                        mediaData = mediaData,
+                        audioDuration = audioDuration
+                    )
+                    transmitMeshPacketSync(packet)
+                }
+            }
+        }
+    }
+
+    fun updateGroupMembers(groupId: String, newMembers: List<Pair<String, String>>) {
+        scope.launch {
+            val myPhone = _engineState.value.myPhoneNumber
+            val group = repository.getGroup(groupId) ?: return@launch
+            if (group.createdByPhone != myPhone) return@launch
+
+            newMembers.forEach { (phone, name) ->
+                repository.saveGroupMember(
+                    GroupMemberEntity(
+                        groupId = groupId,
+                        phoneNumber = phone,
+                        displayName = name,
+                        isAdmin = false
+                    )
+                )
+            }
+
+            val all = repository.getGroupMembersList(groupId)
+            val membersArray = JSONArray()
+            all.forEach { m ->
+                val obj = JSONObject()
+                obj.put("phone", m.phoneNumber)
+                obj.put("name", m.displayName)
+                obj.put("isAdmin", m.isAdmin)
+                membersArray.put(obj)
+            }
+            val membersJson = membersArray.toString()
+
+            all.filter { it.phoneNumber != myPhone }.forEach { m ->
+                val packet = MeshPacket(
+                    packetType = "GROUP_UPDATE",
+                    sourceNodeId = _engineState.value.myNodeId,
+                    sourcePhone = myPhone,
+                    sourceName = _engineState.value.myNickname.ifBlank { "Usuario" },
+                    sourceSsid = _engineState.value.ssid,
+                    sourceAvatar = _engineState.value.myAvatarUri,
+                    destinationPhone = m.phoneNumber,
+                    groupId = groupId,
+                    groupName = group.name,
+                    groupMembersJson = membersJson,
+                    groupAction = "UPDATE"
+                )
+                transmitMeshPacketSync(packet)
+            }
+        }
+    }
+
+    fun removeGroupMember(groupId: String, phoneToRemove: String) {
+        scope.launch {
+            val myPhone = _engineState.value.myPhoneNumber
+            val group = repository.getGroup(groupId) ?: return@launch
+            if (group.createdByPhone != myPhone) return@launch
+
+            repository.removeGroupMember(groupId, phoneToRemove)
+
+            val all = repository.getGroupMembersList(groupId)
+            val membersArray = JSONArray()
+            all.forEach { m ->
+                val obj = JSONObject()
+                obj.put("phone", m.phoneNumber)
+                obj.put("name", m.displayName)
+                obj.put("isAdmin", m.isAdmin)
+                membersArray.put(obj)
+            }
+            val membersJson = membersArray.toString()
+
+            val recipients = (all.map { it.phoneNumber } + phoneToRemove).filter { it != myPhone }.distinct()
+            recipients.forEach { targetPhone ->
+                val packet = MeshPacket(
+                    packetType = "GROUP_UPDATE",
+                    sourceNodeId = _engineState.value.myNodeId,
+                    sourcePhone = myPhone,
+                    sourceName = _engineState.value.myNickname.ifBlank { "Usuario" },
+                    sourceSsid = _engineState.value.ssid,
+                    sourceAvatar = _engineState.value.myAvatarUri,
+                    destinationPhone = targetPhone,
+                    groupId = groupId,
+                    groupName = group.name,
+                    groupMembersJson = membersJson,
+                    groupAction = if (targetPhone == phoneToRemove) "LEAVE" else "REMOVE_MEMBER"
+                )
+                transmitMeshPacketSync(packet)
+            }
+        }
+    }
+
+    fun leaveGroup(groupId: String) {
+        scope.launch {
+            val myPhone = _engineState.value.myPhoneNumber
+            val group = repository.getGroup(groupId) ?: return@launch
+            val all = repository.getGroupMembersList(groupId)
+
+            all.filter { it.phoneNumber != myPhone }.forEach { m ->
+                val packet = MeshPacket(
+                    packetType = "GROUP_UPDATE",
+                    sourceNodeId = _engineState.value.myNodeId,
+                    sourcePhone = myPhone,
+                    sourceName = _engineState.value.myNickname.ifBlank { "Usuario" },
+                    sourceSsid = _engineState.value.ssid,
+                    sourceAvatar = _engineState.value.myAvatarUri,
+                    destinationPhone = m.phoneNumber,
+                    groupId = groupId,
+                    groupName = group.name,
+                    groupAction = "LEAVE"
+                )
+                transmitMeshPacketSync(packet)
+            }
+
+            repository.saveGroup(group.copy(isActive = false))
+            repository.deleteAllGroupMembers(groupId)
+        }
+    }
+
     /**
      * Envía un paquete por todos los canales disponibles de forma SERIALIZADA.
      * Usa un Mutex por socket para evitar que dos paquetes concurrentes
@@ -1539,29 +1851,16 @@ class WiFiMeshEngine(
                         !packet.sourceName.startsWith("ChatMesh_")
                     ) packet.sourceName else packet.sourcePhone
                     val peerAvatar = packet.sourceAvatar
-                    val contact = repository.getContact(packet.sourcePhone)
-                    if (contact == null) {
-                        repository.insertContact(
-                            ContactEntity(
-                                phoneNumber = packet.sourcePhone,
-                                displayName = peerName,
-                                avatarUri = peerAvatar,
-                                isRegisteredInMesh = true,
-                                isConnected = true
-                            )
+                    repository.saveContactPreservingChat(
+                        ContactEntity(
+                            phoneNumber = packet.sourcePhone,
+                            displayName = peerName,
+                            avatarUri = peerAvatar,
+                            isRegisteredInMesh = true,
+                            isConnected = true,
+                            lastSeen = System.currentTimeMillis()
                         )
-                    } else {
-                        val updatedName = if (peerName != packet.sourcePhone) peerName else contact.displayName
-                        val updatedAvatar = peerAvatar ?: contact.avatarUri
-                        repository.insertContact(
-                            contact.copy(
-                                displayName = updatedName,
-                                avatarUri = updatedAvatar,
-                                isConnected = true,
-                                lastSeen = System.currentTimeMillis()
-                            )
-                        )
-                    }
+                    )
 
                     // Respuesta directa e inmediata si es un BEACON de difusión
                     if (packet.packetType == "BEACON" && packet.destinationPhone == "BROADCAST") {
@@ -1750,6 +2049,142 @@ class WiFiMeshEngine(
                         _storiesUpdated.value = System.currentTimeMillis()
                     }
                 }
+                "GROUP_CREATE" -> {
+                    if (isForMe && !packet.groupId.isNullOrBlank()) {
+                        Log.i(TAG, "GROUP_CREATE recibido id=${packet.groupId}, nombre=${packet.groupName} de ${packet.sourcePhone}")
+                        val gId = packet.groupId
+                        val gName = packet.groupName ?: "Grupo"
+                        val group = GroupEntity(
+                            groupId = gId,
+                            name = gName,
+                            createdByPhone = packet.sourcePhone,
+                            createdAt = packet.timestamp,
+                            isActive = true
+                        )
+                        repository.saveGroup(group)
+
+                        packet.groupMembersJson?.let { jsonStr ->
+                            try {
+                                val arr = JSONArray(jsonStr)
+                                val members = mutableListOf<GroupMemberEntity>()
+                                for (i in 0 until arr.length()) {
+                                    val obj = arr.getJSONObject(i)
+                                    members.add(
+                                        GroupMemberEntity(
+                                            groupId = gId,
+                                            phoneNumber = obj.getString("phone"),
+                                            displayName = obj.optString("name", obj.getString("phone")),
+                                            isAdmin = obj.optBoolean("isAdmin", false)
+                                        )
+                                    )
+                                }
+                                repository.saveGroupMembers(members)
+                            } catch (e: Exception) {
+                                Log.e(TAG, "Error parseando miembros de grupo", e)
+                            }
+                        }
+                        notificationHelper.showIncomingMessageNotification(
+                            packet.sourcePhone,
+                            gName,
+                            "Te añadió al grupo $gName"
+                        )
+                    }
+                }
+                "GROUP_UPDATE" -> {
+                    if (isForMe && !packet.groupId.isNullOrBlank()) {
+                        val gId = packet.groupId
+                        Log.i(TAG, "GROUP_UPDATE recibido id=$gId, accion=${packet.groupAction} de ${packet.sourcePhone}")
+                        if (packet.groupAction == "LEAVE" && packet.sourcePhone == myPhone) {
+                            val group = repository.getGroup(gId)
+                            if (group != null) {
+                                repository.saveGroup(group.copy(isActive = false))
+                            }
+                        } else if (packet.groupAction == "LEAVE") {
+                            repository.removeGroupMember(gId, packet.sourcePhone)
+                        } else {
+                            packet.groupMembersJson?.let { jsonStr ->
+                                try {
+                                    val arr = JSONArray(jsonStr)
+                                    val members = mutableListOf<GroupMemberEntity>()
+                                    var amIMember = false
+                                    for (i in 0 until arr.length()) {
+                                        val obj = arr.getJSONObject(i)
+                                        val p = obj.getString("phone")
+                                        if (p == myPhone) amIMember = true
+                                        members.add(
+                                            GroupMemberEntity(
+                                                groupId = gId,
+                                                phoneNumber = p,
+                                                displayName = obj.optString("name", p),
+                                                isAdmin = obj.optBoolean("isAdmin", false)
+                                            )
+                                        )
+                                    }
+                                    if (!amIMember && packet.groupAction == "REMOVE_MEMBER") {
+                                        val g = repository.getGroup(gId)
+                                        if (g != null) repository.saveGroup(g.copy(isActive = false))
+                                    } else {
+                                        repository.deleteAllGroupMembers(gId)
+                                        repository.saveGroupMembers(members)
+                                    }
+                                } catch (e: Exception) {
+                                    Log.e(TAG, "Error procesando GROUP_UPDATE", e)
+                                }
+                            }
+                        }
+                    }
+                }
+                "GROUP_MESSAGE" -> {
+                    if (isForMe && !packet.groupId.isNullOrBlank()) {
+                        Log.i(TAG, "GROUP_MESSAGE recibido grupo=${packet.groupId} de ${packet.sourcePhone}")
+                        sendAck(packet.packetUuid, packet.sourcePhone)
+                        persistIncomingMessage(packet, myPhone)
+                        val g = repository.getGroup(packet.groupId)
+                        val groupTitle = g?.name ?: "Grupo"
+                        val senderName = packet.sourceName.ifBlank { packet.sourcePhone }
+                        notificationHelper.showIncomingMessageNotification(
+                            packet.sourcePhone,
+                            groupTitle,
+                            "$senderName: ${packet.content.ifEmpty { "Nuevo mensaje" }}"
+                        )
+                    }
+                }
+                "GROUP_MESSAGE_CHUNK" -> {
+                    if (isForMe && !packet.groupId.isNullOrBlank()) {
+                        val chunks = receivedChunks.computeIfAbsent(packet.packetUuid) { ConcurrentHashMap() }
+                        packet.mediaData?.let { chunks[packet.chunkIndex] = it }
+                        if (chunks.size == packet.totalChunks) {
+                            val sorted = (0 until packet.totalChunks).joinToString("") { chunks[it].orEmpty() }
+                            Log.i(TAG, "GROUP_MESSAGE completo: ${packet.mediaType}, ${sorted.length} chars")
+                            persistIncomingMessage(packet.copy(mediaData = sorted), myPhone)
+                            sendAck(packet.packetUuid, packet.sourcePhone)
+                            receivedChunks.remove(packet.packetUuid)
+                            val g = repository.getGroup(packet.groupId)
+                            val groupTitle = g?.name ?: "Grupo"
+                            val senderName = packet.sourceName.ifBlank { packet.sourcePhone }
+                            notificationHelper.showIncomingMessageNotification(
+                                packet.sourcePhone,
+                                groupTitle,
+                                "$senderName: ${when (packet.mediaType) {
+                                    "IMAGE" -> "📷 Foto"
+                                    "AUDIO" -> "🎤 Mensaje de voz"
+                                    "FILE" -> "📎 Archivo"
+                                    else -> packet.content.ifEmpty { "Nuevo mensaje" }
+                                }}"
+                            )
+                        }
+                    }
+                }
+                "GROUP_MESSAGE_END" -> {
+                    if (isForMe && !packet.groupId.isNullOrBlank()) {
+                        val chunks = receivedChunks[packet.packetUuid]
+                        if (chunks != null && chunks.size < packet.totalChunks) {
+                            Log.w(TAG, "GROUP_MESSAGE ${packet.packetUuid.take(8)} incompleto: ${chunks.size}/${packet.totalChunks}")
+                        } else {
+                            Log.i(TAG, "GROUP_MESSAGE ${packet.packetUuid.take(8)} confirmado completo")
+                        }
+                    }
+                }
             }
         }
     }
@@ -1759,34 +2194,22 @@ class WiFiMeshEngine(
             packet.sourceName != "Nodo" &&
             !packet.sourceName.startsWith("ChatMesh_")
         ) packet.sourceName else packet.sourcePhone
-        val contact = repository.getContact(packet.sourcePhone)
-        if (contact == null) {
-            repository.insertContact(
-                ContactEntity(
-                    phoneNumber = packet.sourcePhone,
-                    displayName = peerName,
-                    avatarUri = packet.sourceAvatar,
-                    isRegisteredInMesh = true,
-                    isConnected = true
-                )
+        repository.saveContactPreservingChat(
+            ContactEntity(
+                phoneNumber = packet.sourcePhone,
+                displayName = peerName,
+                avatarUri = packet.sourceAvatar,
+                isRegisteredInMesh = true,
+                isConnected = true,
+                lastSeen = System.currentTimeMillis()
             )
-        } else {
-            val updatedName = if (peerName != packet.sourcePhone) peerName else contact.displayName
-            val updatedAvatar = packet.sourceAvatar ?: contact.avatarUri
-            repository.insertContact(
-                contact.copy(
-                    displayName = updatedName,
-                    avatarUri = updatedAvatar,
-                    isConnected = true,
-                    lastSeen = System.currentTimeMillis()
-                )
-            )
-        }
+        )
 
         val entity = MessageEntity(
             messageUuid = packet.packetUuid,
             senderPhone = packet.sourcePhone,
-            recipientPhone = myPhone,
+            recipientPhone = if (packet.groupId != null) null else myPhone,
+            recipientGroupId = packet.groupId,
             content = packet.content,
             mediaType = packet.mediaType,
             mediaBase64 = packet.mediaData,
@@ -1799,7 +2222,7 @@ class WiFiMeshEngine(
     }
 
     private suspend fun relayPacket(packet: MeshPacket) {
-        if (packet.packetType == "VIDEO_FRAME" || packet.packetType.startsWith("STORY_")) return
+        if (packet.packetType == "VIDEO_FRAME" || packet.packetType.startsWith("STORY_") || packet.packetType.startsWith("GROUP_")) return
         val myId = _engineState.value.myNodeId
         if (packet.visitedNodeIds.contains(myId) || packet.hopCount >= packet.maxHops) return
         val relayed = packet.copy(
@@ -1942,28 +2365,25 @@ class WiFiMeshEngine(
                         !packet.sourceName.startsWith("ChatMesh_")
                     ) packet.sourceName else packet.sourcePhone
                     val peerAvatar = packet.sourceAvatar
-                    val existing = repository.getContact(packet.sourcePhone)
-                    val callerContact = if (existing != null) {
-                        val updatedName = if (peerName != packet.sourcePhone) peerName else existing.displayName
-                        val updatedAvatar = peerAvatar ?: existing.avatarUri
-                        val updated = existing.copy(
-                            displayName = updatedName,
-                            avatarUri = updatedAvatar,
-                            isConnected = true
+                    repository.saveContactPreservingChat(
+                        ContactEntity(
+                            phoneNumber = packet.sourcePhone,
+                            displayName = peerName,
+                            avatarUri = peerAvatar,
+                            isRegisteredInMesh = true,
+                            isConnected = true,
+                            lastSeen = System.currentTimeMillis()
                         )
-                        repository.insertContact(updated)
-                        updated
-                    } else {
-                        val newContact = ContactEntity(
+                    )
+                    val callerContact = repository.findContactMatching(packet.sourcePhone)
+                        ?: repository.getContact(packet.sourcePhone)
+                        ?: ContactEntity(
                             phoneNumber = packet.sourcePhone,
                             displayName = peerName,
                             avatarUri = peerAvatar,
                             isRegisteredInMesh = true,
                             isConnected = true
                         )
-                        repository.insertContact(newContact)
-                        newContact
-                    }
 
                     _engineState.value = _engineState.value.copy(
                         isCallActive = true,

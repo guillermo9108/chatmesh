@@ -52,7 +52,7 @@ object ContactSyncUtil {
                     }
                 }
                 if (contactsToInsert.isNotEmpty()) {
-                    repository.insertAllContacts(contactsToInsert)
+                    repository.insertOrUpdateContactsPreservingChat(contactsToInsert)
                     count = contactsToInsert.size
                 }
             }

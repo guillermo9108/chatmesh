@@ -41,7 +41,11 @@ data class MeshPacket(
     val storyBackgroundColor: Int = 0,
     val storyExpiresAt: Long = 0L,
     val storyAuthorName: String? = null,
-    val storyAuthorAvatarUri: String? = null
+    val storyAuthorAvatarUri: String? = null,
+    val groupId: String? = null,
+    val groupName: String? = null,
+    val groupMembersJson: String? = null,
+    val groupAction: String? = null
 ) {
     fun toJson(): String {
         val obj = JSONObject()
@@ -84,6 +88,10 @@ data class MeshPacket(
         if (storyExpiresAt != 0L) obj.put("storyExpiresAt", storyExpiresAt)
         if (storyAuthorName != null) obj.put("storyAuthorName", storyAuthorName)
         if (storyAuthorAvatarUri != null) obj.put("storyAuthorAvatarUri", storyAuthorAvatarUri)
+        if (groupId != null) obj.put("groupId", groupId)
+        if (groupName != null) obj.put("groupName", groupName)
+        if (groupMembersJson != null) obj.put("groupMembersJson", groupMembersJson)
+        if (groupAction != null) obj.put("groupAction", groupAction)
         return obj.toString()
     }
 
@@ -135,7 +143,11 @@ data class MeshPacket(
                     storyBackgroundColor = obj.optInt("storyBackgroundColor", 0),
                     storyExpiresAt = obj.optLong("storyExpiresAt", 0L),
                     storyAuthorName = if (obj.has("storyAuthorName")) obj.getString("storyAuthorName") else null,
-                    storyAuthorAvatarUri = if (obj.has("storyAuthorAvatarUri")) obj.getString("storyAuthorAvatarUri") else null
+                    storyAuthorAvatarUri = if (obj.has("storyAuthorAvatarUri")) obj.getString("storyAuthorAvatarUri") else null,
+                    groupId = if (obj.has("groupId")) obj.getString("groupId") else null,
+                    groupName = if (obj.has("groupName")) obj.getString("groupName") else null,
+                    groupMembersJson = if (obj.has("groupMembersJson")) obj.getString("groupMembersJson") else null,
+                    groupAction = if (obj.has("groupAction")) obj.getString("groupAction") else null
                 )
             } catch (e: Exception) {
                 null

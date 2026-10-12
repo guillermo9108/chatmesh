@@ -31,21 +31,36 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
 
         // 1. Crear el motor singleton ANTES de que el ViewModel lo use
-        val db = ChatMeshDatabase.getDatabase(applicationContext)
-        val repo = ChatMeshRepository(
-            db.userDao(),
-            db.contactDao(),
-            db.messageDao(),
-            db.meshNodeDao(),
-            db.callDao(),
-            db.storyDao(),
-            db.storySeenDao()
-        )
-        MeshEngineHolder.init(applicationContext, repo)
+        try {
+            val db = ChatMeshDatabase.getDatabase(applicationContext)
+            val repo = ChatMeshRepository(
+                db.userDao(),
+                db.contactDao(),
+                db.messageDao(),
+                db.meshNodeDao(),
+                db.callDao(),
+                db.storyDao(),
+                db.storySeenDao(),
+                db.groupDao(),
+                db.groupMemberDao()
+            )
+            MeshEngineHolder.init(applicationContext, repo)
+        } catch (e: Exception) {
+            android.util.Log.e("MainActivity", "Error inicializando MeshEngineHolder", e)
+        }
 
         // 2. Arrancar el servicio en primer plano y el servicio de gestión WiFi Direct P2P
-        MeshForegroundService.start(applicationContext)
-        com.example.mesh.WifiDirectP2pService.start(applicationContext)
+        try {
+            MeshForegroundService.start(applicationContext)
+        } catch (e: Exception) {
+            android.util.Log.e("MainActivity", "Error iniciando MeshForegroundService", e)
+        }
+
+        try {
+            com.example.mesh.WifiDirectP2pService.start(applicationContext)
+        } catch (e: Exception) {
+            android.util.Log.e("MainActivity", "Error iniciando WifiDirectP2pService", e)
+        }
 
         enableEdgeToEdge()
         handleIntent(intent)

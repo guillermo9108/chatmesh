@@ -11,11 +11,14 @@ class ChatMeshRepository(
     private val meshNodeDao: MeshNodeDao,
     private val callDao: CallDao,
     private val storyDao: StoryDao,
-    private val storySeenDao: StorySeenDao
+    private val storySeenDao: StorySeenDao,
+    private val groupDao: GroupDao,
+    private val groupMemberDao: GroupMemberDao
 ) {
     val userProfileFlow: Flow<UserProfile?> = userDao.getUserProfileFlow()
     val allContactsFlow: Flow<List<ContactEntity>> = contactDao.getAllContactsFlow()
     val chatContactsFlow: Flow<List<ContactEntity>> = contactDao.getChatContactsFlow()
+    val allGroupsFlow: Flow<List<GroupEntity>> = groupDao.getAllGroupsFlow()
     fun getOnlineContactsFlow(activeThreshold: Long = System.currentTimeMillis() - 120_000L): Flow<List<ContactEntity>> =
         contactDao.getOnlineContactsFlow(activeThreshold)
     val allMeshNodesFlow: Flow<List<MeshNodeEntity>> = meshNodeDao.getAllNodesFlow()
@@ -67,6 +70,110 @@ class ChatMeshRepository(
         }
     }
 
+    /**
+     * Busca un contacto existente cuyo número sea equivalente al dado
+     * usando la lógica de SimDetectionUtil.isMatchingPhone.
+     */
+    suspend fun findContactMatching(phone: String): ContactEntity? {
+        if (!com.example.mesh.SimDetectionUtil.isValidPhoneNumber(phone)) return null
+        val all = contactDao.getAllContactsList()
+        return all.firstOrNull {
+            com.example.mesh.SimDetectionUtil.isMatchingPhone(it.phoneNumber, phone)
+        }
+    }
+
+    /**
+     * Inserta o actualiza un contacto preservando SIEMPRE los campos de conversación
+     * (lastMessageTime, lastMessageText, unreadCount, isConnected).
+     *
+     * Si ya existe un contacto que coincide con isMatchingPhone, fusiona los datos
+     * y NO crea un registro nuevo.
+     *
+     * Si el nuevo número tiene más dígitos que el existente (por ejemplo, +5358182585 vs 58182585),
+     * migra la fila al número más completo y actualiza también los mensajes asociados.
+     */
+    suspend fun saveContactPreservingChat(contact: ContactEntity) {
+        if (!com.example.mesh.SimDetectionUtil.isValidPhoneNumber(contact.phoneNumber)) return
+
+        val existing = findContactMatching(contact.phoneNumber)
+
+        if (existing == null) {
+            // No hay duplicado, insertar directo
+            contactDao.insertOrUpdate(contact)
+            return
+        }
+
+        // Ya existe un contacto equivalente.
+        val newDigits = contact.phoneNumber.filter { it.isDigit() }
+        val oldDigits = existing.phoneNumber.filter { it.isDigit() }
+
+        // ¿Debemos migrar al número más largo? (más específico)
+        val targetPhone = if (newDigits.length > oldDigits.length) {
+            contact.phoneNumber
+        } else {
+            existing.phoneNumber
+        }
+
+        // Fusionar campos
+        val mergedName = when {
+            contact.displayName.isNotBlank() && contact.displayName != contact.phoneNumber -> contact.displayName
+            existing.displayName.isNotBlank() && existing.displayName != existing.phoneNumber -> existing.displayName
+            else -> targetPhone
+        }
+
+        val mergedAvatar = contact.avatarUri ?: existing.avatarUri
+        val mergedRegistered = existing.isRegisteredInMesh || contact.isRegisteredInMesh
+        val mergedConnected = existing.isConnected || contact.isConnected
+
+        if (targetPhone != existing.phoneNumber) {
+            // Migrar la fila al número más completo
+            try {
+                // 1. Actualizar mensajes apuntando al viejo número
+                messageDao.updateSenderPhone(existing.phoneNumber, targetPhone)
+                messageDao.updateRecipientPhone(existing.phoneNumber, targetPhone)
+
+                // 2. Borrar el contacto viejo
+                contactDao.deleteContactByPhone(existing.phoneNumber)
+
+                // 3. Insertar con el número nuevo preservando todo
+                contactDao.insertOrUpdate(
+                    existing.copy(
+                        phoneNumber = targetPhone,
+                        displayName = mergedName,
+                        avatarUri = mergedAvatar,
+                        isRegisteredInMesh = mergedRegistered,
+                        isConnected = mergedConnected
+                    )
+                )
+            } catch (_: Exception) {
+                // Si falla la migración, al menos actualizamos los campos del existente
+                contactDao.updateContactProfileOnly(existing.phoneNumber, mergedName, mergedAvatar)
+            }
+        } else {
+            // Mismo número canónico: solo actualizar nombre, avatar y estado
+            contactDao.updateContactProfileOnly(existing.phoneNumber, mergedName, mergedAvatar)
+            if (mergedConnected && !existing.isConnected) {
+                contactDao.updateConnectionStatus(existing.phoneNumber, true, System.currentTimeMillis())
+            }
+            if (mergedRegistered && !existing.isRegisteredInMesh) {
+                contactDao.insertOrUpdate(existing.copy(isRegisteredInMesh = true))
+            }
+        }
+    }
+
+    /**
+     * Sincroniza una lista de contactos de la libreta preservando los chats activos.
+     * NO destruye lastMessageTime, lastMessageText, unreadCount ni isConnected.
+     * Detecta y fusiona duplicados por isMatchingPhone.
+     */
+    suspend fun insertOrUpdateContactsPreservingChat(contacts: List<ContactEntity>) {
+        for (c in contacts) {
+            try {
+                saveContactPreservingChat(c)
+            } catch (_: Exception) {}
+        }
+    }
+
     suspend fun cleanInvalidContacts() {
         try {
             contactDao.deleteInvalidContacts()
@@ -94,13 +201,36 @@ class ChatMeshRepository(
             "FILE" -> "📎 Archivo"
             else -> message.content
         }
-        val peerPhone = if (message.isOutgoing) message.recipientPhone else message.senderPhone
-        contactDao.updateLastMessage(peerPhone, preview, message.timestamp)
-        if (!message.isOutgoing) {
-            contactDao.incrementUnread(peerPhone)
+        if (message.recipientGroupId != null) {
+            groupDao.updateLastMessage(message.recipientGroupId, preview, message.timestamp)
+            if (!message.isOutgoing) {
+                groupDao.incrementUnread(message.recipientGroupId)
+            }
+        } else {
+            val peerPhone = if (message.isOutgoing) message.recipientPhone ?: "" else message.senderPhone
+            if (peerPhone.isNotBlank()) {
+                contactDao.updateLastMessage(peerPhone, preview, message.timestamp)
+                if (!message.isOutgoing) {
+                    contactDao.incrementUnread(peerPhone)
+                }
+            }
         }
         return id
     }
+
+    suspend fun saveGroup(group: GroupEntity) = groupDao.insertOrUpdate(group)
+    suspend fun saveGroups(groups: List<GroupEntity>) = groupDao.insertAll(groups)
+    suspend fun getGroup(groupId: String): GroupEntity? = groupDao.getGroupById(groupId)
+    fun getGroupFlow(groupId: String): Flow<GroupEntity?> = groupDao.getGroupFlow(groupId)
+    suspend fun saveGroupMember(member: GroupMemberEntity) = groupMemberDao.insertOrUpdate(member)
+    suspend fun saveGroupMembers(members: List<GroupMemberEntity>) = groupMemberDao.insertAll(members)
+    fun getGroupMembersFlow(groupId: String): Flow<List<GroupMemberEntity>> = groupMemberDao.getMembersFlow(groupId)
+    suspend fun getGroupMembersList(groupId: String): List<GroupMemberEntity> = groupMemberDao.getMembersList(groupId)
+    suspend fun removeGroupMember(groupId: String, phone: String) = groupMemberDao.deleteMember(groupId, phone)
+    suspend fun deleteAllGroupMembers(groupId: String) = groupMemberDao.deleteAllMembers(groupId)
+    fun getGroupConversationFlow(groupId: String): Flow<List<MessageEntity>> = messageDao.getGroupConversationFlow(groupId)
+    suspend fun markGroupChatAsRead(groupId: String) = groupDao.markAsRead(groupId)
+    suspend fun incrementGroupUnread(groupId: String) = groupDao.incrementUnread(groupId)
 
     suspend fun updateMessageStatus(uuid: String, status: String) =
         messageDao.updateStatus(uuid, status)
